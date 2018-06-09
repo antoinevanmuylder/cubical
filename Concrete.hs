@@ -6,8 +6,7 @@ module Concrete where
 import Exp.Abs
 import qualified CTT as C
 import Pretty
-
-import Control.Applicative
+import Prelude hiding (exp)
 import Control.Arrow (second)
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Error hiding (throwError)
@@ -83,7 +82,7 @@ runResolver :: Resolver a -> Either String a
 runResolver x = runIdentity $ runErrorT $ runReaderT x emptyEnv
 
 updateModule :: String -> Env -> Env
-updateModule mod e = e {envModule = mod}
+updateModule modul e = e {envModule = modul}
 
 insertBinder :: (C.Binder,SymKind) -> Env -> Env
 insertBinder (x@(n,_),var) e
@@ -100,9 +99,9 @@ insertColor :: C.Binder -> Env -> Env
 insertColor (x,_) e = e {colors = x:colors e }
 
 removeColor :: C.CTer -> Env -> Env
-removeColor (C.Zero _) = id
+removeColor (C.Zero) = id
+removeColor C.Infty = id
 removeColor (C.CVar x) = \e -> e {colors = colors e \\ [x] }
-removeColor (C.Max x y) = removeColor x . removeColor y
 
 insertVars :: [C.Binder] -> Env -> Env
 insertVars = flip $ foldr insertVar
@@ -158,9 +157,8 @@ resolveCVar (AIdent (l,x)) = do
         show l <+> "in module" <+> modName
 
 resolveColor :: CExp -> Resolver C.CTer
-resolveColor (Zero n) = pure $ C.Zero (fromIntegral n)
+resolveColor (Zero) = pure $ C.Zero
 resolveColor (CVar x) = C.CVar <$> resolveCVar x
-resolveColor (CMax x y) = C.Max <$> resolveColor x <*> resolveColor y
 
 mcols :: MCols -> [AIdent]
 mcols NoCols = []
@@ -201,8 +199,9 @@ binds :: (Ter -> Ter -> Ter) -> Tele -> Resolver Ter -> Resolver Ter
 binds f = flip $ foldr $ bind f
 
 resolveExp :: Exp -> Resolver Ter
-resolveExp (CU cs)      = C.CU <$> mapM resolveCVar cs
 resolveExp U            = return C.U
+resolveExp (CSubst _ _ _) = error "CSubst; rtodo"
+resolveExp (Path a b c) = C.Path <$> resolveExp a <*> ((,) <$> resolveExp b <*> resolveExp c)
 resolveExp (Var x)      = resolveVar x
 resolveExp (App t s)    = case unApps t [s] of
   (x@(Var (AIdent (_,n))),xs) -> do
@@ -233,21 +232,12 @@ resolveExp (Split brs)  = do
 resolveExp (Let decls e) = do
   (rdecls,names) <- resolveDecls decls
   C.mkWheres rdecls <$> local (insertBinders names) (resolveExp e)
-resolveExp (Param t) = C.Param <$> resolveExp t
-resolveExp (PsiAlt t u) = C.Psi <$> (Just <$> mapM resolveCVar t) <*> resolveExp u
-resolveExp (Psi u) = C.Psi Nothing <$> resolveExp u
 resolveExp (CLam i is t) = clams (i:is) $ resolveExp t
 resolveExp (CPi i is t) = cpis (i:is) $ resolveExp t
 resolveExp (CApp t i) = do
   i' <- resolveColor i
   local (removeColor i') $ C.CApp <$> resolveExp t <*> pure i'
-resolveExp (CProj t p i) = do
-  i' <- resolveCVar i
-  local (removeColor $ C.CVar i') $ C.CProj <$> resolveExp t <*> pure (fromIntegral p) <*> pure i'
-resolveExp (Lift t u) = C.Lift <$> resolveExp t <*> resolveExp u
-resolveExp (CPair t u) = C.CPair <$> resolveExps t <*> resolveExp u
-resolveExp (Phi t u) = C.Phi <$> resolveExp t <*> resolveExp u
-resolveExp (Ni t u) = C.Ni <$> resolveExp t <*> resolveExps u
+resolveExp (Lift t i u) = C.Lift <$> resolveExp t <*> resolveCVar i <*> resolveExp u
 
 resolveExps :: [Exp] -> Resolver [Ter]
 resolveExps ts = traverse resolveExp ts

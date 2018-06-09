@@ -1,0 +1,26 @@
+module stt where
+
+t1 : forall i. U
+t1 = <i> U
+
+t2 : forall i. U
+t2 = <j> t1@j
+
+Eq : (A : U) -> (x y : A) -> U
+Eq A x y = ID (<i j> A) [<i> x, <i> y]
+
+
+face0 : (A : U) -> (forall i j. A) -> forall j. A@0@j
+face0 x = <k> x@0@k
+
+face1 : (A : U) -> (forall i j. A@i@j) -> forall i. A@i@0
+face1 x = <k> x@k@0
+
+extensionality : (A B : U) -> (f g : A -> B) -> ((x y : A) -> Eq A x y -> Eq B (f x) (g y)) -> Eq (A -> B) f g
+extensionality A B f g p = <i j> \z -> (p (face0 A z) (face1 A z) z)@i@j
+
+-- coe : (A B : U) -> (t : A) -> Eq U A B -> B
+-- coe A B t X = (<j> (<i> (t ^j X@i@j))@0)@Inf
+
+-- substitutivity :
+

@@ -1,9 +1,9 @@
 {-# LANGUAGE PatternSynonyms #-}
 module CTT where
 
-import Control.Applicative
 import Pretty
 import Data.List ((\\), intercalate)
+import Data.Monoid ((<>))
 --------------------------------------------------------------------------------
 -- | Terms
 
@@ -65,22 +65,16 @@ data Ter = App Ter Ter
          | Undef Loc
 
          | CLam Binder Ter
-         | CPair [Ter] Ter
          | CApp Ter CTer
          | CProj Ter Int TColor
-           
            --    Γ, ∀i.Δ ⊢ t : ∀i.A
            -- --------------------------
            --    Γ,i, Δ ⊢ t@(0/i) : A@0
-                 
          | CPi Ter
-         | Param Ter
-         | Psi (Maybe [TColor]) Ter
-         | Phi Ter Ter
-         | Ni Ter [Ter]
-         | CU [TColor]
          | Rename CTer Ter
-         | Lift Ter Ter
+
+         | Path Ter (Ter,Ter)
+         | Lift Ter TColor Ter
   deriving Eq
 
 mkApps :: Ter -> [Ter] -> Ter
@@ -107,25 +101,14 @@ newtype Color = Color String
 instance Show Color where
      show (Color x) = x
 
-data MCol color = Infty | Zero Int | CVar color | Max (MCol color) (MCol color)
+data MCol color = Infty | Zero | CVar color
   deriving (Eq,Show)
-
-maxx :: MCol t -> MCol t -> MCol t
-maxx (Zero i) (Zero j) = Zero (max i j)
-maxx (Zero 0) x = x
-maxx x (Zero 0) = x
-maxx x y = Max x y
-maxx Infty _ = Infty
-maxx _ Infty = Infty
 
 type CVal = MCol Color
 type CTer = MCol TColor
 
-pattern VU = VV Nothing
 
-data Val = COLOR
-         | VV (Maybe [Color])
-         | VFizzle
+data Val = VU
          | Ter Ter Env
          | VPi Val Val
          | VSigma Val Val
@@ -136,18 +119,19 @@ data Val = COLOR
          | VVar String
          | VFst Val
          | VSnd Val
-
-         | VCApp Val CVal
-         | VCPi Val
-         | VCLam Color Val
-
-         | VCPair [Val] Val
-         | VParam Val
-         | VPsi Val
-         | VPhi Val Val
-         | VNi Val [Val]
          | VLam (Val -> Val)
-         | VLift Val Val
+
+         | VCPi Val
+         | VCLam (CVal -> Val)
+         | VCApp Val CVal
+
+         | VSimplexT [Color] [Val] [(Color,Val,Color)] -- A simplex in U. colors, types, functions from/to type
+         | VSimplex  [(Color,Val)] -- A simplex. colors, values at each type (point)
+         -- | Similar to a singleton type, but with borders
+         | VPath Val {- ^ This value is a family of types (ie. a function from color(s) to U) -} [Val] {- borders -}
+         | VLift [(Color,CVal)] Val Color Val
+         | COLOR -- fake type for colors
+
   -- deriving Eq
 
 class Nominal a where
@@ -168,35 +152,29 @@ instance (Nominal a) => Nominal (Maybe a) where
   support Nothing = []
 
 instance (Nominal a) => Nominal (MCol a) where
-  support (Zero _) = []
+  support (Zero) = []
   support (CVar a) = support a
-  support (Max a b) = support (a,b)
   support Infty = []
 
 instance Nominal Val where
   support v0 = case v0 of
-    VV cs -> support cs
+    VU -> []
     VPi a b -> support (a,b)
     VSigma a b -> support (a,b)
     VSPair a b -> support (a,b)
-    VCPair a b -> support (a,b)
-    VPhi a b -> support (a,b)
-    VNi a b -> support (a,b)
     VCon _ vs -> support vs
     VApp a p ->  support (a,p)
     VSplit a p ->  support (a,p)
-    VVar x -> []
-    VFizzle -> []
+    VVar _x -> []
     VFst a -> support a
     VSnd a -> support a
-    VParam a -> support a
-    VPsi a -> support a
     VCPi a -> support a
     VCApp a c -> support (a,c)
-    VCLam i a -> support (i,a)
+    VCLam a -> support (a $ CVar $ Color "__COLOR_SUPPORT__")
     VLam f -> support (f $ VVar "__SUPPORT__")
     Ter x e -> support (x,e)
 
+fresh :: Nominal p => p -> [Char]
 fresh a = x0 where (x0:_) = namesFrom "ijk" \\ support a
 
 mkVar :: Int -> Val
@@ -206,7 +184,6 @@ mkCol :: Int -> CVal
 mkCol k = CVar $ Color ('C' : show k)
 
 isNeutral :: Val -> Bool
-isNeutral (VCPair _ _) = True -- ?????
 isNeutral (VCApp u _) = isNeutral u
 isNeutral (VApp u _)   = isNeutral u
 isNeutral (VSplit _ v) = isNeutral v
@@ -266,40 +243,34 @@ instance Show Ter where
   show = showTer
 
 showCol :: Show color => MCol color -> String
-showCol (Zero i)  = show i
+showCol (Zero)  = "0"
 showCol Infty  = " ∞ "
 showCol (CVar x) = show x
-showCol (Max x y) = showCol x ++ " ⊔ " ++ showCol y
 
 showConstr :: Show color => MCol color -> [Char]
 showConstr xs =  "[" ++ showCol xs ++ ">0]"
 
 showTer :: Ter -> String
 showTer U             = "U"
-showTer (CU cs)             = "#" ++ concat cs
+showTer (Path a (x,y)) = ("ID("<> showTer a <> ")") <+> showTers [x,y]
+showTer (Lift a i t) = showTer a <+> ("↑" <> show i) <+> showTer t
 showTer (App e0 e1)   = showTer e0 <+> showTer1 e1
 showTer (CApp e0 e1)   = showTer e0 <+> "@" <+> showCol e1
 showTer (CProj e0 p i)   = showTer e0 <+> "/" ++ show p ++ "/" ++ show i
-showTer (Rename i t)   = showTer t <+> "/" <+> showCol i
 showTer (Pi e0 e1)    = "Pi" <+> showTers [e0,e1]
 showTer (CPi e) = "Pi" <+> showTer e
 showTer (Lam (x,_) e) = '\\' : x <+> "->" <+> showTer e
 showTer (CLam (x,_) e) = "<" ++ x ++ ">" <+> showTer e
 showTer (Fst e)       = showTer e ++ ".1"
 showTer (Snd e)       = showTer e ++ ".2"
-showTer (Param e)       = showTer e ++ "!"
-showTer (Phi f g)       = "phi" <+> showTers [f,g]
-showTer (Psi _ e)       = "PSI" <+> showTer e
 showTer (Sigma e0 e1) = "Sigma" <+> showTers [e0,e1]
 showTer (SPair e0 e1) = "pair" <+> showTers [e0,e1]
-showTer (CPair e0 e1) = "[" <+> showTerss e0 <+> "," <+> showTer e1 <+>"]"
 showTer (Where e d)   = showTer e <+> "where" <+> showDecls d
 showTer (Var x)       = x
 showTer (Con c es)    = c <+> showTers es
 showTer (Split l _)   = "split " ++ show l
 showTer (Sum l _)     = "sum " ++ show l
 showTer (Undef _)     = "undefined (1)"
-showTer (Ni f a)    = showTer f ++ " ? " ++ showTerss a
 
 showTers :: [Ter] -> String
 showTers = hcat . map showTer1
@@ -326,12 +297,15 @@ instance Show Val where
 
 showVal :: [String] -> Val -> String
 showVal su@(s:ss) t0 = case t0 of
+  VSimplexT is _ _ -> "Simplex" <+> show is
+  VSimplex xs -> "simplex" <+> show (map fst xs) <+> showVals su (map snd xs)
   COLOR -> "COLOR"
-  VV Nothing           -> "U"
-  VV (Just cs)           -> "#(" ++ concatMap show cs ++ ")"
+  VU           -> "U"
+  (VPath a xs) -> ("ID("<> showVal su a <> ")") <+> showVals su xs
+  (VLift liftProjs a i t) -> showVal su a <+> ("↑" <> show i) <+> showVal su t <+> show liftProjs
   (Ter t env)  -> show t <+> show env
   (VCon c us)  -> c <+> showVals su us
-  (VCLam i f)  -> "<" ++ show i ++ ">" <+> showVal ss f
+  (VCLam t)  -> "<" ++ s ++ ">" <+> showVal ss (t $ CVar $ Color s)
   (VLam f)  -> "\\" ++ s ++ " -> " <+> showVal ss (f $ VVar s)
   (VPi a f)    -> "Pi" <+> svs [a,f]
   (VCPi f)    -> "PI" <+> sv f
@@ -340,18 +314,13 @@ showVal su@(s:ss) t0 = case t0 of
   (VSplit u v) -> sv u <+> sv1 v
   (VVar x)     -> x
   (VSPair u v) -> "pair" <+> svs [u,v]
-  (VCPair u v) -> sss u <+> sv v
   (VSigma u v) -> "Sigma" <+> svs [u,v]
   (VFst u)     -> sv u ++ ".1"
   (VSnd u)     -> sv u ++ ".2"
-  (VParam u)     -> sv1 u ++ "!"
-  (VPsi u)     -> "PSI" ++ sv u
-  (VPhi t u)     -> "Phi" <+> svs [t,u]
-  (VNi f a)    -> sv1 f ++ " ? " ++ sss a
  where sv = showVal su
        sv1 = showVal1 su
        svs = showVals su
-       sss =  parens . intercalate "&" . map (showVal su)
+       -- sss =  parens . intercalate "&" . map (showVal su)
 
 showDim :: Show a => [a] -> String
 showDim = parens . ccat . map show
@@ -361,7 +330,6 @@ showVals su = hcat . map (showVal1 su)
 
 showVal1 :: [String] -> Val -> String
 showVal1 _ VU          = "U"
-showVal1 _ VFizzle          = "#"
 showVal1 _ (VCon c []) = c
 showVal1 su u@(VVar{})  = showVal su u
 showVal1 su u           = parens $ showVal su u
