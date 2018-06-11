@@ -73,7 +73,7 @@ data Ter = App Ter Ter
          | CPi Ter
          | Rename CTer Ter
 
-         | Path Ter (Ter,Ter)
+         | Path Ter [(TColor,Ter)]
          | Lift Ter TColor Ter
   deriving Eq
 
@@ -128,7 +128,7 @@ data Val = VU
          | VSimplexT [Color] [Val] [(Color,Val,Color)] -- A simplex in U. colors, types, functions from/to type
          | VSimplex  [(Color,Val)] -- A simplex. colors, values at each type (point)
          -- | Similar to a singleton type, but with borders
-         | VPath Val {- ^ This value is a family of types (ie. a function from color(s) to U) -} [Val] {- borders -}
+         | VPath Val {- ^ This value is a family of types (ie. a function from color(s) to U) -} [(Color,Val)] {- borders -}
          | VLift [(Color,CVal)] Val Color Val
          | COLOR -- fake type for colors
 
@@ -252,7 +252,7 @@ showConstr xs =  "[" ++ showCol xs ++ ">0]"
 
 showTer :: Ter -> String
 showTer U             = "U"
-showTer (Path a (x,y)) = ("ID("<> showTer a <> ")") <+> showTers [x,y]
+showTer (Path a xs) = ("ID" <> "("<> showTer a <> ")") <+> ("[" <> mconcat ["(" <> c <> "/" <> showTer t <> ")" | (c,t) <- xs] <> "]")
 showTer (Lift a i t) = showTer a <+> ("↑" <> show i) <+> showTer t
 showTer (App e0 e1)   = showTer e0 <+> showTer1 e1
 showTer (CApp e0 e1)   = showTer e0 <+> "@" <+> showCol e1
@@ -301,7 +301,7 @@ showVal su@(s:ss) t0 = case t0 of
   VSimplex xs -> "simplex" <+> show (map fst xs) <+> showVals su (map snd xs)
   COLOR -> "COLOR"
   VU           -> "U"
-  (VPath a xs) -> ("ID("<> showVal su a <> ")") <+> showVals su xs
+  (VPath a xs) -> ("ID("<> showVal su a <> ")") <+> ("[" <> mconcat ["(" <> c <> "/" <> showVal su t <> ")" | (Color c,t) <- xs] <> "]")
   (VLift liftProjs a i t) -> showVal su a <+> ("↑" <> show i) <+> showVal su t <+> show liftProjs
   (Ter t env)  -> show t <+> show env
   (VCon c us)  -> c <+> showVals su us

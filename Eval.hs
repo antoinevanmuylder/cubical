@@ -1,4 +1,8 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE EmptyCase #-}
+{-# LANGUAGE PatternSynonyms, LambdaCase #-}
 module Eval where
 
 import CTT
@@ -67,19 +71,27 @@ lift ps v i t =
    (VCLam _) -> error "lift: not a type (VCLam)"
    (VCApp _ _) -> suspended
    (VSimplex _) -> error "lift: not a type (VSimplex)"
-   (VPath t' _) -> lft v t'
+   -- (VPath t' _) -> lft v t' -- FIXME: add the appropriate number of CPis in front of t'
    (VLift _ _ _ _) -> suspended
 
 eval :: Env -> Ter -> Val
 eval _e U              = VU
-eval e (Lift s i t) = lift [(j,jval) | (j,(_,jval)) <- zip freshColors projectedColors]
-                        (eval e' s) i' (eval e' t)
-  where e' = _
-        CVar i' = colEval i e'
-        projectedColors,freeColors :: [(TColor,CVal)]
-        (projectedColors,freeColors) = partition (isCVar . snd) (envColors e)
-        refreshColors :: [String]
-        refreshColors = _
+eval e (Lift s i t) = case colEval e (CVar i) of
+  Zero -> eval e s
+  CVar i' -> lift [(j,colEval e (CVar j0)) | (j0,j) <- renaming]
+                  (eval e' s) i' (eval e' t)
+  where e' = mapEnv e
+        mapEnv :: Env -> Env
+        mapEnv = \case
+          Empty -> Empty
+          (Pair rho d) -> Pair (mapEnv rho) d
+          (PDef d rho) -> PDef d (mapEnv rho)
+          (PCol rho (b@(x,_),v)) -> PCol (mapEnv rho) $ (b,) $ case lookup x renaming of
+            Nothing -> v
+            Just j -> CVar j
+        projectedColors :: [Ident]
+        projectedColors = [x | ((x,_loc),Zero) <- envColors e]
+        renaming = zip projectedColors (freshColors e)
 eval e (App r s)       = app (eval e r) (eval e s)
 eval e (Var i)         = snd (look i e)
 eval e (Pi a b)        = VPi (eval e a) (eval e b)
@@ -101,15 +113,25 @@ eval e (CPi a) = VCPi (eval e a)
 --                         -- Zero   -> clam' $ \_ ->             (eval e t)
 --                         -- Infty  -> clam' $ \_ ->             (eval e t)
 --                         CVar i -> clam' $ \i' -> ceval i i' (eval e t)
-eval e (Path t _) = cpi $ \_i -> cpi $ \_j -> eval e t
+eval e (Path t xs) = VPath (eval e t) [(k,eval e z) | (colEval e . CVar -> CVar k,z) <- xs]
+
+envColors :: Env -> [(Binder,CVal)]
+envColors = \case
+  Empty -> []
+  Pair e _ -> envColors e
+  PDef _ e -> envColors e
+  PCol e x -> x:envColors e
+
+freshColors :: Env -> [Color]
+freshColors e = map Color (namesFrom ['ᚠ'..'ᛪ']) \\ [c | (_,CVar c) <- envColors e] 
 
 colEval :: Env -> MCol TColor -> MCol Color
 colEval e (CVar i) = snd $ lkCol i e
-colEval _ Infty = Infty
-colEval _ Zero = Infty
+colEval e Infty = CVar $ head $ freshColors e
+colEval _ Zero = Zero
 
 evals :: Env -> [(Binder,Ter)] -> [(Binder,Val)]
-evals env bts = [ (b,eval env t) | (b,t) <- bts ]
+evals env bts = [(b,eval env t) | (b,t) <- bts]
 
 cevals :: [(Color,CVal)] -> Val -> Val
 cevals [] = id
@@ -225,17 +247,22 @@ cpis n t = VCPi $ clam' $ \i -> cpis (n-1) $ \is -> t (i:is)
 cpi :: (CVal -> Val) -> Val
 cpi f = VCPi (VCLam f)
 
+-- revCPis :: Int -> Val -> Maybe (\[CVal] -> Val)
+-- revCPis 0 v = Just (\[] -> v)
+-- revCPis 0 (CPi f) = Just (\[] -> v)
+
 -- fc :: Int -> [a] -> a
 -- fc n as | n < length as = as !! n
 -- fc _ _ = error "Attempt to access non-existing face"
+
   
 capp :: Val -> CVal -> Val
 capp (VCLam f) x = f x
 capp f a = VCApp f a
 
-capps :: Val -> [Color] -> Val
+capps :: Val -> [CVal] -> Val
 capps a [] = a
-capps a (i:is) = capps (capp a $ CVar i) is
+capps a (i:is) = capps (capp a i) is
 
 app :: Val -> Val -> Val
 -- <f,g>@i u = [f u(i0), g <i>u]@i
@@ -334,4 +361,20 @@ conv _ x              x'           = different x x'
 
 convEnv :: Int -> Env -> Env -> Maybe String
 convEnv k e e' = mconcat $ zipWith (conv k) (valOfEnv e) (valOfEnv e')
+
+sub :: Int -> [Val] -> Val -> Val -> Maybe String
+sub k value (VPath p _) q = sub k value p q
+sub k value q (VPath p fs) = sub k value q p <> anyOf [mconcat [conv k (proj i v) f | (i,f) <- fs] | v <- value]
+sub k x (VCPi f) (VCPi f') = sub k ((`capp` v) <$> x) (f' `capp` v) (f' `capp` v)
+  where v = mkCol k
+sub k _ subt super = conv k subt super
+
+orElse :: Maybe String -> Maybe String -> Maybe String
+orElse Nothing _ = Nothing
+orElse _ Nothing = Nothing
+orElse (Just x) (Just y) = Just (x <> " and " <> y)
+
+anyOf :: [Maybe String] -> Maybe String
+anyOf [] = error "anyOf: at least one choice is necessary!"
+anyOf x = foldr1 orElse x
 

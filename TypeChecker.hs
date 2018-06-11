@@ -36,10 +36,12 @@ reAbsCtxtOnCol x _ (((x',_),COLOR):ctx) | x == x' = ctx
 reAbsCtxtOnCol x i ((b,v):ctx) = (b, VCPi $ cabs v):reAbsCtxtOnCol x i ctx
   where cabs body = case i of
           (Zero) -> clam'  $ \_ -> body
+          (Infty) -> clam'  $ \_ -> body
           CVar j -> clam j body
 
 reAbsCtxt :: CTer -> CVal -> Ctxt -> Ctxt
 reAbsCtxt (Zero) _ = id
+reAbsCtxt (Infty) _ = id
 reAbsCtxt (CVar i) j = reAbsCtxtOnCol i j
 
 reAbsAll :: CTer -> CVal -> TEnv -> TEnv
@@ -61,8 +63,9 @@ verboseEnv, silentEnv :: TEnv
 verboseEnv = TEnv 0 Empty [] [] True
 silentEnv  = TEnv 0 Empty [] [] False
 
-addCol :: Binder -> Color -> TEnv -> TEnv
-addCol x p (TEnv k rho gam ex v) = TEnv (k+1) (PCol rho (x,p)) ((x,COLOR):gam) ex v
+addCol :: Binder -> CVal -> TEnv -> TEnv
+addCol x p@(CVar _) (TEnv k rho gam ex v) = TEnv (k+1) (PCol rho (x,p)) ((x,COLOR):gam) ex v
+addCol _ _ _ = error "typechecker can't add Zero (because of Lift checking)" 
 
 addTypeVal :: (Binder, Val) -> TEnv -> TEnv
 addTypeVal p@(x,_) (TEnv k rho gam ex v) =
@@ -134,7 +137,7 @@ localM f r = do
 getFresh :: Typing Val
 getFresh = mkVar <$> index <$> ask
 
-getFreshCol :: Typing Color
+getFreshCol :: Typing CVal
 getFreshCol = mkCol <$> index <$> ask
 
 checkDecls :: Decls -> Typing ()
@@ -161,14 +164,23 @@ checkLogg v t = logg ("Checking that " ++ show t ++ " has type " ++ show v) $ ch
 --     checkEval a' t
 
 check :: Val -> Ter -> Typing ()
-check a t = case (a,t) of
+check a t = -- logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
+  case (a,t) of
+  -- (VPath p xs,_) -> do  -- TODO: replace by proper subtyping check?
+  --   t' <- checkEval p t
+  --   forM_ xs $ \(i,x) ->
+  --     checkConv ("border " <> show i) (proj i t') x
   (_,Con c es) -> do
     (bs,nu) <- getLblType c a
     checks (bs,nu) es
-  (VPath p [x,y],_) -> do
-    t' <- checkEval p t
-    checkConv "first border" (clam' $ \i -> t' `capp` CVar i `capp` Zero) x
-    checkConv "second border" (t' `capp` Zero) y
+  (_,CApp u c) -> do
+    c' <- colorEval c
+    case c' of
+      CVar i -> local (reAbsAll c c') $ checkLogg (cpi $ \j -> ceval i j a) u
+      _ -> do
+        logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
+          v <- checkInfer t
+          checkSub "inferred type" [] v a
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
   (VPi (Ter (Sum _ cas) nu) f,Split _ ces) -> do
     let cas' = sortBy (compare `on` fst . fst) cas
@@ -185,15 +197,7 @@ check a t = case (a,t) of
     check (app f v) t2
   (VCPi f, CLam x b) -> do
     var <- getFreshCol
-    local (addCol x var) $ check (capp f $ CVar var) b
-  (_,CApp u c) -> do
-    c' <- colorEval c
-    case c' of
-      CVar i -> local (reAbsAll c c') $ checkLogg (VCPi $ clam'  $ \j -> ceval i j a) u
-      _ -> do
-        logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
-          v <- checkInfer t
-          checkConv "inferred type" a v
+    local (addCol x var) $ check (capp f var) b
   (_,Where e d) -> do
     checkDecls d
     localM (addDecls d) $ check a e
@@ -201,7 +205,8 @@ check a t = case (a,t) of
   _ -> do
     logg ("checking that term " ++ show t ++ " has type " ++ show a) $ do
        v <- checkInfer t
-       checkConv "inferred type" a v
+       x <- eval <$> asks env <*> pure t
+       checkSub "inferred type" [x] v a
 
 
 arrs :: [Val] -> Val -> Val
@@ -228,17 +233,26 @@ eval' t = do
   e <- asks env
   return $ eval e t
 
-checkConvs :: String -> [Val] -> [Val] -> Typing ()
-checkConvs msg a v = sequence_ [checkConv msg a' v' | (a',v') <- zip a v]
+-- checkConvs :: String -> [Val] -> [Val] -> Typing ()
+-- checkConvs msg a v = sequence_ [checkConv msg a' v' | (a',v') <- zip a v]
 
-checkConv :: [Char] -> Val -> Val -> ReaderT TEnv (ErrorT String IO) ()
-checkConv msg a v = do
+checkSub :: [Char] -> [Val] -> Val -> Val -> ReaderT TEnv (ErrorT String IO) ()
+checkSub msg value subtyp super = do
     k <- index <$> ask
-    case conv k v a of
+    case sub k value subtyp super of
       Nothing -> return ()
       Just err -> do
       -- rho <- asks env
-      oops $ msg ++ " check conv: \n  " ++ show v ++ " /= " ++ show a ++ "\n because  " ++ err
+      oops $ msg ++ " check sub: \n  " ++ show value ++ "value \n  "++ show subtyp ++ " ⊄ " ++ show super ++ "\n because  " ++ err
+
+checkConv :: [Char] -> Val -> Val -> ReaderT TEnv (ErrorT String IO) ()
+checkConv msg subtyp super = do
+    k <- index <$> ask
+    case conv k subtyp super of
+      Nothing -> return ()
+      Just err -> do
+      -- rho <- asks env
+      oops $ msg ++ " check conv: \n  " ++ show subtyp ++ " ⊄ " ++ show super ++ "\n because  " ++ err
 
 checkBranch :: (Tele,Env) -> Val -> Brc -> Typing ()
 checkBranch (xas,nu) f (c,(xs,e)) = do
@@ -255,6 +269,13 @@ inferType t = do
    VU -> return a
    _ -> oops $ show a ++ " is not a type"
 
+colVarEval :: TColor -> Typing Color
+colVarEval i = do
+  rho <- asks env
+  let CVar i' = colEval rho (CVar i)
+  return i'
+
+ -- in the typechecker we NEVER put Zero in the color environment.
 checkInfer :: Ter -> Typing Val
 checkInfer e = case e of
 {-
@@ -265,16 +286,16 @@ checkInfer e = case e of
    Γ ⊢ t ^i A : A
 
 -}
-  Lift t i a -> do
-    a' <- inferType a
-    rho <- asks env
-    let i' = colEval rho i
-    check (proj i' a') t
-    return a'
-  Path a (x,y) -> do
-    a' <- checkEval (cpi $ \_ -> cpi $ \_ -> VU) a
-    check (cpi $ \i -> (a' `capp` Zero  ) `capp` CVar i) x
-    check (cpi $ \i -> (a' `capp` CVar i) `capp` Zero  ) y
+  -- Lift t i a -> do
+  --   a' <- inferType a
+  -- i' <- colVarEval i
+  --   check (proj i' a') t
+  --   return a'
+  Path a ixs -> do
+    a' <- checkEval VU a
+    forM_ ixs $ \(i,x) -> do
+      i' <- colVarEval i
+      check (proj i' a') x
     return VU
   CPi (CLam x t) -> do
     var <- getFreshCol
@@ -323,7 +344,7 @@ checkInfer e = case e of
   Where t d -> do
     checkDecls d
     localM (addDecls d) $ checkInfer t
-  _ -> oops ("checkInfer " ++ show e)
+  _ -> oops ("cannot infer the type of " ++ show e)
 
 extractFun :: Int -> Val -> Typing ([Val],Val)
 extractFun 0 a = return ([],a)

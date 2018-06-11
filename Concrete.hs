@@ -158,6 +158,7 @@ resolveCVar (AIdent (l,x)) = do
 
 resolveColor :: CExp -> Resolver C.CTer
 resolveColor (Zero) = pure $ C.Zero
+resolveColor (Infty) = pure $ C.Infty
 resolveColor (CVar x) = C.CVar <$> resolveCVar x
 
 mcols :: MCols -> [AIdent]
@@ -198,10 +199,13 @@ bind f (x,t) e = f <$> resolveExp t <*> lam x e
 binds :: (Ter -> Ter -> Ter) -> Tele -> Resolver Ter -> Resolver Ter
 binds f = flip $ foldr $ bind f
 
+resolveFace :: Face -> Resolver (C.TColor,Ter)
+resolveFace (Fc i t) = (,) <$> resolveCVar i <*> resolveExp t
+
 resolveExp :: Exp -> Resolver Ter
 resolveExp U            = return C.U
 resolveExp (CSubst _ _ _) = error "CSubst; rtodo"
-resolveExp (Path a b c) = C.Path <$> resolveExp a <*> ((,) <$> resolveExp b <*> resolveExp c)
+resolveExp (Path a xs) = C.Path <$> resolveExp a <*> mapM resolveFace xs
 resolveExp (Var x)      = resolveVar x
 resolveExp (App t s)    = case unApps t [s] of
   (x@(Var (AIdent (_,n))),xs) -> do
@@ -218,7 +222,7 @@ resolveExp (Sigma t b)  = case pseudoTele t of
   Nothing   -> throwError "Telescope malformed in Sigma"
 resolveExp (Pi t b)     =  case pseudoTele t of
   Just tele -> binds C.Pi tele (resolveExp b)
-  Nothing   -> throwError "Telescope malformed in Pigma"
+  Nothing   -> throwError "Telescope malformed in Pi"
 resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
 resolveExp (Lam x xs t) = do
   lams (x:xs) (resolveExp t)

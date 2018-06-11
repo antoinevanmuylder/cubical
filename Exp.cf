@@ -30,6 +30,10 @@ coercions CExp 2 ;
 Cols.     MCols ::= "<" [AIdent] ">";
 NoCols.   MCols ::= ;
 
+Fc.             Face ::= AIdent "/" Exp ;
+
+separator Face "," ;
+
 Let.      Exp  ::= "let" "{" [Decl] "}" "in" Exp ;
 Lam.      Exp  ::= "\\" AIdent [AIdent] "->" Exp ;
 CLam.     Exp  ::= "<" AIdent [AIdent] ">" Exp ;
@@ -44,7 +48,7 @@ CSubst.   Exp3 ::= Exp3 "[" CExp "/" AIdent "]" ;
 Fst.      Exp3 ::= Exp3 ".1" ;
 Snd.      Exp3 ::= Exp3 ".2" ;
 Pair.     Exp3 ::= "(" Exp "," Exp ")" ;
-Path.     Exp3 ::= "ID" "(" Exp ")" "[" Exp "," Exp "]" ;
+Path.     Exp3 ::= "ID" "(" Exp ")" "[" [Face] "]" ;
 Lift.     Exp3 ::= Exp3 "^" AIdent Exp3 ;
 Var.      Exp3 ::= AIdent ;
 U.        Exp3 ::= "U" ;
