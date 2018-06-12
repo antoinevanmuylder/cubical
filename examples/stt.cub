@@ -14,7 +14,6 @@ extensionality : (A B : U) -> (f g : A -> B) -> ((x y : A) -> Eq A x y -> Eq B (
 extensionality A B f g p = <i j> \z -> (p (fc0 A z) (fc1 A z) z)@i@j
 
 
-
 -- -------------------------------------------------------------------------------
 -- z:forall i j. A |- p z@0@j z@i@0 z : Id (B) [i/f z@0@j,j/g z@i@0]
 -- -------------------------------------------------------------------------------
@@ -25,3 +24,8 @@ extensionality A B f g p = <i j> \z -> (p (fc0 A z) (fc1 A z) z)@i@j
 -- i j |- \z -> (p (fc0 A z) (fc1 A z) z)@i@j : Id (A -> B) [i/f,j/g]
 -- -------------------------------------------------------------------------------
 -- <i j> \z -> (p (fc0 A z) (fc1 A z) z)@i@j : forall i j. Id (A -> B) [i/f,j/g]
+
+
+coe : (A B : U) -> (t : A) -> Eq U A B -> B
+coe A B t X = (t ^j X@i@j)[0/i][+/j]
+

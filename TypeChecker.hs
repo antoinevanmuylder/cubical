@@ -1,17 +1,14 @@
 {-# LANGUAGE PatternSynonyms, FlexibleContexts, RecordWildCards #-}
 module TypeChecker where
 
-import Data.Either
 import Data.Function
 import Data.List
-import Data.Maybe
 import Data.Monoid hiding (Sum)
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Trans.Error hiding (throwError)
 import Control.Monad.Trans.Reader
 import Control.Monad.Error (throwError)
-import Control.Applicative
 import Pretty
 
 import CTT
@@ -192,6 +189,9 @@ check a t = -- logg ("Extra Checking that " ++ show t ++ " has type " ++ show a)
   (VPi aa f,Lam x tt)  -> do
     var <- getFresh
     local (addTypeVal (x,aa)) $ check (app f var) tt
+  (VPath (VPi aa f) borders,Lam x tt)  -> do
+    var <- getFresh
+    local (addTypeVal (x,aa)) $ check (VPath (app f var) [(i,b `app` var) | (i,b) <- borders]) tt
   (VSigma aa f, SPair t1 t2) -> do
     v <- checkEval aa t1
     check (app f v) t2
@@ -240,18 +240,16 @@ checkSub :: [Char] -> [Val] -> Val -> Val -> ReaderT TEnv (ErrorT String IO) ()
 checkSub msg value subtyp super = do
     k <- index <$> ask
     case sub k value subtyp super of
-      Nothing -> return ()
-      Just err -> do
-      -- rho <- asks env
+      NoErr -> return ()
+      Err err -> do
       oops $ msg ++ " check sub: \n  " ++ show value ++ "value \n  "++ show subtyp ++ " ⊄ " ++ show super ++ "\n because  " ++ err
 
 checkConv :: [Char] -> Val -> Val -> ReaderT TEnv (ErrorT String IO) ()
 checkConv msg subtyp super = do
     k <- index <$> ask
     case conv k subtyp super of
-      Nothing -> return ()
-      Just err -> do
-      -- rho <- asks env
+      NoErr -> return ()
+      Err err -> do
       oops $ msg ++ " check conv: \n  " ++ show subtyp ++ " ⊄ " ++ show super ++ "\n because  " ++ err
 
 checkBranch :: (Tele,Env) -> Val -> Brc -> Typing ()
@@ -301,6 +299,10 @@ checkInfer e = case e of
     var <- getFreshCol
     _ <- local (addCol x var) $ inferType t
     return VU
+  CLam i t -> do -- additional rule to infer CLam
+    var@(CVar v) <- getFreshCol
+    a <- local (addCol i var) $ checkInfer t
+    return (cpi $ \i' -> ceval v i' a)
   Pi a (Lam x b) -> do
     _ <- inferType a
     localM (addType (x,a)) $ inferType b

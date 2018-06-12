@@ -204,7 +204,7 @@ resolveFace (Fc i t) = (,) <$> resolveCVar i <*> resolveExp t
 
 resolveExp :: Exp -> Resolver Ter
 resolveExp U            = return C.U
-resolveExp (CSubst _ _ _) = error "CSubst; rtodo"
+resolveExp (CSubst t e i) = resolveExp (CApp (CLam i [] t) e)
 resolveExp (Path a xs) = C.Path <$> resolveExp a <*> mapM resolveFace xs
 resolveExp (Var x)      = resolveVar x
 resolveExp (App t s)    = case unApps t [s] of

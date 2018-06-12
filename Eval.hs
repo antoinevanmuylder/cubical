@@ -191,6 +191,10 @@ ceval :: Color -> CVal -> Val -> Val
 ceval i p v0 =
   let ev = ceval i p
   in case v0 of
+    (VPath a borders) -> VPath (ev a) [(j,ev b) | (cceval i p . CVar -> (CVar j),b) <- borders]
+    -- (VSimplexT _ _ _) -> _
+    -- (VSimplex _) -> _
+    -- (VLift _ _ _ _) -> _
     VU  -> VU
     Ter t env -> Ter t (cevalEnv i p env) -- add color projections!
     VPi a b -> VPi (ev a) (ev b)
@@ -286,35 +290,25 @@ sndSVal (VSPair _ b)    = b
 sndSVal u | isNeutral u = VSnd u
           | otherwise   = error $ show u ++ " should be neutral"
 
-convs :: Int -> [Val] -> [Val] -> Maybe String
+convs :: Int -> [Val] -> [Val] -> Err
 convs k a b = mconcat $ zipWith (conv k) a b
 
-equal :: (Show a, Eq a) => a -> a -> Maybe [Char]
-equal a b | a == b = Nothing
+equal :: (Show a, Eq a) => a -> a -> Err
+equal a b | a == b = NoErr
           | otherwise = different a b
 
-different :: (Show a2, Show a1) => a1 -> a2 -> Maybe [Char]
-different a b = Just $ show a ++ " /= " ++ show b
+different :: (Show a2, Show a1) => a1 -> a2 -> Err
+different a b = Err $ show a ++ " /= " ++ show b
 
--- newtype Conv = Conv {fromConv :: (Int -> (Color -> CVal) -> Maybe String)}
+data Err = Err String | NoErr deriving Show
 
--- instance Monoid Conv where
---   mempty = Conv $ \_ _ -> Nothing
---   Conv c1 `mappend` Conv c2 = Conv $ \k m -> case c1 k m of
---     Nothing -> c2 k m
---     Just err -> Just err
+instance Monoid Err where
+  NoErr `mappend` x = x
+  Err x `mappend` _ = Err x
+  mempty = NoErr
 
--- locN :: (Int -> Conv) -> Conv
--- locN cont = Conv $ \k m -> fromConv (cont k) (k+1) m
-
--- locVar :: (Val -> Conv) -> Conv
--- locVar cont = locN $ cont . mkVar
-
--- locCol :: (Val -> Conv) -> Conv
--- locVar cont = locN $ cont . mkVar
-
-conv :: Int -> Val -> Val -> Maybe String
-conv _ VU VU = Nothing
+conv :: Int -> Val -> Val -> Err
+conv _ VU VU = NoErr
 conv k (VLam f) t = conv (k+1) (f v) (t `app` v)
   where v = mkVar k
 conv k t (VLam f) = conv (k+1) (f v) (t `app` v)
@@ -359,22 +353,40 @@ conv k (VSplit u v) (VSplit u' v') = conv k u u' <> conv k v v'
 conv _ (VVar x)     (VVar x')      = x `equal` x'
 conv _ x              x'           = different x x'
 
-convEnv :: Int -> Env -> Env -> Maybe String
+convEnv :: Int -> Env -> Env -> Err
 convEnv k e e' = mconcat $ zipWith (conv k) (valOfEnv e) (valOfEnv e')
 
-sub :: Int -> [Val] -> Val -> Val -> Maybe String
+subset :: Eq a => [a] -> [a] -> Bool
+subset x y = null (x \\ y)
+
+-- TODO: not excellent, should be done as a proper singleton type with a simplex.
+sub :: Int -> [Val] -> Val -> Val -> Err
+sub k value (VPath q gs) (VPath p fs) | map fst fs `subset` map fst gs
+  = sub k value q p <> mconcat [conv k f g | (i,f) <- fs, let Just g = lookup i gs]
 sub k value (VPath p _) q = sub k value p q
 sub k value q (VPath p fs) = sub k value q p <> anyOf [mconcat [conv k (proj i v) f | (i,f) <- fs] | v <- value]
-sub k x (VCPi f) (VCPi f') = sub k ((`capp` v) <$> x) (f' `capp` v) (f' `capp` v)
+sub k x (VCPi f) (VCPi f') = sub (k+1) ((`capp` v) <$> x) (f `capp` v) (f' `capp` v)
   where v = mkCol k
 sub k _ subt super = conv k subt super
 
-orElse :: Maybe String -> Maybe String -> Maybe String
-orElse Nothing _ = Nothing
-orElse _ Nothing = Nothing
-orElse (Just x) (Just y) = Just (x <> " and " <> y)
+orElse :: Err -> Err -> Err
+orElse NoErr _ = NoErr
+orElse _ NoErr = NoErr
+orElse (Err x) (Err y) = Err (x <> " and " <> y)
 
-anyOf :: [Maybe String] -> Maybe String
+anyOf :: [Err] -> Err
 anyOf [] = error "anyOf: at least one choice is necessary!"
 anyOf x = foldr1 orElse x
 
+
+-- ttt :: Val
+-- ttt = cpi $ \(CVar i) -> cpi $ \(CVar j) -> VPath (VVar "X2") [(i,app (VVar "X3") (VVar "X8")),(j,app (VVar "X4") (VVar "X8"))]
+
+-- uuu :: Val
+-- uuu = VPath (VVar "X2") [(Color "i",app (VVar "X3") (VVar "X8")),(Color "j",app (VVar "X4") (VVar "X8"))]
+
+-- -- >>> ttt
+-- -- PI <α> PI <β> ID(X2) [(α/X3 X8)(β/X4 X8)]
+
+-- -- >>> sub 0 [] ttt ttt
+-- -- NoErr
