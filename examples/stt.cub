@@ -27,5 +27,5 @@ extensionality A B f g p = <i j> \z -> (p (fc0 A z) (fc1 A z) z)@i@j
 
 
 coe : (A B : U) -> (t : A) -> Eq U A B -> B
-coe A B t X = (t ^j X@i@j)[0/i][+/j]
+coe A B t X = (t ^j (X@i@j))[0/i][+/j]
 

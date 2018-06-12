@@ -265,7 +265,8 @@ inferType t = do
   a <- checkInfer t
   case a of
    VU -> return a
-   _ -> oops $ show a ++ " is not a type"
+   VPath VU _ -> return a
+   _ -> oops $ show t ++ " is not a type, but " ++ show a
 
 colVarEval :: TColor -> Typing Color
 colVarEval i = do
@@ -284,11 +285,12 @@ checkInfer e = case e of
    Γ ⊢ t ^i A : A
 
 -}
-  -- Lift t i a -> do
-  --   a' <- inferType a
-  -- i' <- colVarEval i
-  --   check (proj i' a') t
-  --   return a'
+  Lift t i a -> do
+    _ <- inferType a
+    a' <- eval' a
+    i' <- colVarEval i
+    check (proj i' a') t
+    return a'
   Path a ixs -> do
     a' <- checkEval VU a
     forM_ ixs $ \(i,x) -> do
