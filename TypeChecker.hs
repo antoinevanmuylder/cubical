@@ -6,16 +6,14 @@ import Data.List
 import Data.Monoid hiding (Sum)
 import Control.Monad
 import Control.Monad.Trans
-import Control.Monad.Trans.Error hiding (throwError)
+import Control.Monad.Except
 import Control.Monad.Trans.Reader
-import Control.Monad.Error (throwError)
-import Pretty
 
 import CTT
 import Eval
 
 -- Type checking monad
-type Typing a = ReaderT TEnv (ErrorT String IO) a
+type Typing a = ReaderT TEnv (ExceptT String IO) a
 
 -- Environment for type checker
 data TEnv = TEnv { index   :: Int   -- for de Bruijn levels
@@ -99,7 +97,7 @@ trace s = do
   when b $ liftIO (putStrLn s)
 
 runTyping :: TEnv -> Typing a -> IO (Either String a)
-runTyping env t = runErrorT $ runReaderT t env
+runTyping env t = runExceptT $ runReaderT t env
 
 -- Used in the interaction loop
 runDecls :: TEnv -> Decls -> IO (Either String TEnv)
@@ -230,7 +228,7 @@ eval' t = do
 -- checkConvs :: String -> [Val] -> [Val] -> Typing ()
 -- checkConvs msg a v = sequence_ [checkConv msg a' v' | (a',v') <- zip a v]
 
-checkSub :: [Char] -> [Val] -> Val -> Val -> ReaderT TEnv (ErrorT String IO) ()
+checkSub :: [Char] -> [Val] -> Val -> Val -> ReaderT TEnv (ExceptT String IO) ()
 checkSub msg value subtyp super = do
     k <- index <$> ask
     case sub k value subtyp super of
@@ -238,7 +236,7 @@ checkSub msg value subtyp super = do
       Err err -> do
       oops $ msg ++ " check sub: \n  " ++ show value ++ "value \n  "++ show subtyp ++ " ⊄ " ++ show super ++ "\n because  " ++ err
 
-checkConv :: [Char] -> Val -> Val -> ReaderT TEnv (ErrorT String IO) ()
+checkConv :: [Char] -> Val -> Val -> ReaderT TEnv (ExceptT String IO) ()
 checkConv msg subtyp super = do
     k <- index <$> ask
     case conv k subtyp super of

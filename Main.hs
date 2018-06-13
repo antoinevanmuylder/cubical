@@ -1,7 +1,7 @@
 module Main where
 
 import Control.Monad.Trans.Reader
-import Control.Monad.Error
+import Control.Monad.Except
 import Data.List
 import System.Directory
 import System.FilePath
@@ -113,7 +113,7 @@ loop flags f names tenv@(TC.TEnv _ rho _ _ _) = do
     Just ":h"  -> outputStrLn help >> loop flags f names tenv
     Just str   -> case pExp (lexer str) of
       Bad err -> outputStrLn ("Parse error: " ++ err) >> loop flags f names tenv
-      Ok  exp ->
+      Ok exp ->
         case runResolver $ local (insertBinders names) $ resolveExp exp of
           Left  err  -> do outputStrLn ("Resolver failed: " ++ err)
                            loop flags f names tenv

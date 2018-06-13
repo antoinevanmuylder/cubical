@@ -9,8 +9,7 @@ import Pretty
 import Prelude hiding (exp)
 import Control.Arrow (second)
 import Control.Monad.Trans.Reader
-import Control.Monad.Trans.Error hiding (throwError)
-import Control.Monad.Error (throwError)
+import Control.Monad.Except
 import Control.Monad (when)
 import Data.Functor.Identity
 import Data.List (nub,find,(\\))
@@ -73,13 +72,13 @@ data Env = Env { envModule :: String,
                  variables :: [(C.Binder,SymKind)] }
   deriving (Eq, Show)
 
-type Resolver a = ReaderT Env (ErrorT String Identity) a
+type Resolver a = ReaderT Env (ExceptT String Identity) a
 
 emptyEnv :: Env
 emptyEnv = Env "" [] []
 
 runResolver :: Resolver a -> Either String a
-runResolver x = runIdentity $ runErrorT $ runReaderT x emptyEnv
+runResolver x = runIdentity $ runExceptT $ runReaderT x emptyEnv
 
 updateModule :: String -> Env -> Env
 updateModule modul e = e {envModule = modul}
