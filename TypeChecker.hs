@@ -29,7 +29,9 @@ data TEnv = TEnv { index   :: Int   -- for de Bruijn levels
 
 reAbsCtxtOnCol :: TColor -> Color -> Ctxt -> Ctxt
 reAbsCtxtOnCol _ _ [] = []
-reAbsCtxtOnCol x _ (((x',_),COLOR):ctx) | x == x' = ctx
+reAbsCtxtOnCol x i (((x',x'loc),COLOR):ctx)
+  | x == x' = ctx
+  | otherwise = ((x',x'loc),COLOR):reAbsCtxtOnCol x i ctx
 reAbsCtxtOnCol x i ((b,v):ctx) = (b, VCPi $ cabs v):reAbsCtxtOnCol x i ctx
   where cabs body = clam i body
 
@@ -170,6 +172,8 @@ check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
     c' <- colorEval c
     case (c,c') of
       (CVar i,CVar i') -> local (reAbsAll i i') $ do
+        -- ctx <- asks ctxt
+        -- trace ("after reabs " <> show (i,i') <> "\n, context became \n" <> showCtxt ctx)
         checkLogg (cpi $ \j -> ceval i' j a) u
       _ -> logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
           v <- checkInfer t
@@ -344,8 +348,8 @@ checkInfer' e = case e of
   CApp t u -> do
     u' <- colorEval u
     c <- local (possiblyReAbsAll u u') $ do
-      ctx <- asks ctxt
-      trace ("after reabs " <> show (u,u') <> "\n, ctx = : " <> showCtxt ctx)
+      -- ctx <- asks ctxt
+      -- trace ("after reabs " <> show (u,u') <> "\n, context became \n" <> showCtxt ctx)
       (checkInfer t)
     case c of
       VCPi f -> do return $ (capp f u')
