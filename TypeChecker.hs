@@ -156,12 +156,6 @@ checkTele ((x,a):xas) = do
 checkLogg :: Val -> Ter -> Typing ()
 checkLogg v t = logg ("Checking that " ++ show t ++ " has type " ++ show v) $ check v t
 
--- checkEvalFaces :: Val -> [Ter] -> Typing [Val]
--- checkEvalFaces a ts = do
---   checkNumber ts
---   forM (zip ts (faces a)) $ \(t,a') -> do
---     checkEval a' t
-
 check :: Val -> Ter -> Typing ()
 check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
   case (a,t) of
@@ -280,6 +274,13 @@ checkInfer e = do
   x <- checkInfer' e
   trace ("Inferred: " <> show e <> " has type " <> show x)
   return x
+
+-- inferTypeEval a = do
+--   t <- inferType a
+--   a' <- eval' a
+--   case t of
+--     VPath _ borders -> return [borders,a]
+--     _ -> return a
 
 checkInfer' :: Ter -> Typing Val
 checkInfer' e = case e of
