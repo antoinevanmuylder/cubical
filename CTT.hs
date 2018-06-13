@@ -252,8 +252,8 @@ showConstr xs =  "[" ++ showCol xs ++ ">0]"
 
 showTer :: Ter -> String
 showTer U             = "U"
-showTer (Path a xs) = ("ID" <> "("<> showTer a <> ")") <+> ("[" <> mconcat ["(" <> c <> "/" <> showTer t <> ")" | (c,t) <- xs] <> "]")
-showTer (Lift a i t) = showTer a <+> ("↑" <> show i) <+> showTer t
+showTer (Path a xs) = ("ID" <> "("<> showTer a <> ")") <+> ("[" <> commas ["(" <> c <> "/" <> showTer t <> ")" | (c,t) <- xs] <> "]")
+showTer (Lift a i t) = showTer a <+> ("↑" <> show i) <+> parens (showTer t)
 showTer (App e0 e1)   = showTer e0 <+> showTer1 e1
 showTer (CApp e0 e1)   = showTer e0 <+> "@" <+> showCol e1
 showTer (CProj e0 p i)   = showTer e0 <+> "/" ++ show p ++ "/" ++ show i
@@ -274,9 +274,6 @@ showTer (Undef _)     = "undefined (1)"
 
 showTers :: [Ter] -> String
 showTers = hcat . map showTer1
-
-showTerss :: [Ter] -> String
-showTerss = parens . intercalate "&" . map showTer
 
 showTer1 :: Ter -> String
 showTer1 U           = "U"
@@ -301,7 +298,7 @@ showVal su@(s:ss) t0 = case t0 of
   VSimplex xs -> "simplex" <+> show (map fst xs) <+> showVals su (map snd xs)
   COLOR -> "COLOR"
   VU           -> "U"
-  (VPath a xs) -> ("ID("<> showVal su a <> ")") <+> ("[" <> mconcat ["(" <> c <> "/" <> showVal su t <> ")" | (Color c,t) <- xs] <> "]")
+  (VPath a xs) -> ("ID("<> showVal su a <> ")") <+> ("[" <> commas ["(" <> c <> "/" <> showVal su t <> ")" | (Color c,t) <- xs] <> "]")
   (VLift liftProjs a i t) -> showVal su a <+> ("↑" <> show i) <+> showVal su t <+> show liftProjs
   (Ter t env)  -> show t <+> show env
   (VCon c us)  -> c <+> showVals su us

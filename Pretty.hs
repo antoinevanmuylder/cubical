@@ -1,6 +1,6 @@
 -- Common functions used for pretty printing.
 module Pretty where
-
+import Data.List (intercalate)
 --------------------------------------------------------------------------------
 -- | Pretty printing combinators. Use the same names as in the pretty library.
 
@@ -29,3 +29,6 @@ parens p  = "(" ++ p ++ ")"
 abrack :: String -> String
 abrack [] = ""
 abrack p  = "<" ++ p ++ ">"
+
+commas :: [String] -> String
+commas = intercalate ","

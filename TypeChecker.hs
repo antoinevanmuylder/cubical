@@ -27,22 +27,21 @@ data TEnv = TEnv { index   :: Int   -- for de Bruijn levels
                  }
   deriving (Show)
 
-reAbsCtxtOnCol :: Ident -> CVal -> Ctxt -> Ctxt
+reAbsCtxtOnCol :: TColor -> Color -> Ctxt -> Ctxt
 reAbsCtxtOnCol _ _ [] = []
 reAbsCtxtOnCol x _ (((x',_),COLOR):ctx) | x == x' = ctx
 reAbsCtxtOnCol x i ((b,v):ctx) = (b, VCPi $ cabs v):reAbsCtxtOnCol x i ctx
-  where cabs body = case i of
-          (Zero) -> clam'  $ \_ -> body
-          (Infty) -> clam'  $ \_ -> body
-          CVar j -> clam j body
+  where cabs body = clam i body
 
-reAbsCtxt :: CTer -> CVal -> Ctxt -> Ctxt
-reAbsCtxt (Zero) _ = id
-reAbsCtxt (Infty) _ = id
-reAbsCtxt (CVar i) j = reAbsCtxtOnCol i j
+reAbsCtxt :: TColor -> Color -> Ctxt -> Ctxt
+reAbsCtxt i j = reAbsCtxtOnCol i j
 
-reAbsAll :: CTer -> CVal -> TEnv -> TEnv
-reAbsAll x i e = e {env = reAbsWholeEnvOnCol x (env e),
+possiblyReAbsAll :: CTer -> CVal -> TEnv -> TEnv
+possiblyReAbsAll (CVar x) (CVar i) e = reAbsAll x i e
+possiblyReAbsAll _ _ e = e
+
+reAbsAll :: TColor -> Color -> TEnv -> TEnv
+reAbsAll x i e = e {env = reAbsWholeEnvOnCol x i (env e),
                     ctxt = reAbsCtxt x i (ctxt e)}
 
 showCtxt :: Show a => [(([Char], t), a)] -> [Char]
@@ -75,6 +74,7 @@ addC :: Ctxt -> (Tele,Env) -> [(Binder,Val)] -> Typing Ctxt
 addC gam _             []          = return gam
 addC gam ((y,a):as,nu) ((x,u):xus) = 
   addC ((x,eval nu a):gam) (as,Pair nu (y,u)) xus
+addC _ ([], _) (_:_) = error "addC: panic: impossible case"
 
 addBranch :: [(Binder,Val)] -> (Tele,Env) -> TEnv -> Typing TEnv
 addBranch nvs (tele,env) (TEnv k rho gam ex v) = do
@@ -161,23 +161,19 @@ checkLogg v t = logg ("Checking that " ++ show t ++ " has type " ++ show v) $ ch
 --     checkEval a' t
 
 check :: Val -> Ter -> Typing ()
-check a t = -- logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
+check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
   case (a,t) of
-  -- (VPath p xs,_) -> do  -- TODO: replace by proper subtyping check?
-  --   t' <- checkEval p t
-  --   forM_ xs $ \(i,x) ->
-  --     checkConv ("border " <> show i) (proj i t') x
   (_,Con c es) -> do
     (bs,nu) <- getLblType c a
     checks (bs,nu) es
   (_,CApp u c) -> do
     c' <- colorEval c
-    case c' of
-      CVar i -> local (reAbsAll c c') $ checkLogg (cpi $ \j -> ceval i j a) u
-      _ -> do
-        logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
+    case (c,c') of
+      (CVar i,CVar i') -> local (reAbsAll i i') $ do
+        checkLogg (cpi $ \j -> ceval i' j a) u
+      _ -> logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
           v <- checkInfer t
-          checkSub "inferred type" [] v a
+          checkSub "inferred type" [] v a -- if not a variable, fall back to plain inference
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
   (VPi (Ter (Sum _ cas) nu) f,Split _ ces) -> do
     let cas' = sortBy (compare `on` fst . fst) cas
@@ -271,12 +267,18 @@ inferType t = do
 colVarEval :: TColor -> Typing Color
 colVarEval i = do
   rho <- asks env
+  -- in the typechecker we NEVER put Zero in the color environment.
   let CVar i' = colEval rho (CVar i)
   return i'
 
- -- in the typechecker we NEVER put Zero in the color environment.
 checkInfer :: Ter -> Typing Val
-checkInfer e = case e of
+checkInfer e = do
+  x <- checkInfer' e
+  trace ("Inferred: " <> show e <> " has type " <> show x)
+  return x
+
+checkInfer' :: Ter -> Typing Val
+checkInfer' e = case e of
 {-
 
    Γ ⊢ A : U
@@ -341,7 +343,10 @@ checkInfer e = case e of
       _          -> oops $ show c ++ " is not a sigma-type"
   CApp t u -> do
     u' <- colorEval u
-    c <- local (reAbsAll u u') (checkInfer t)
+    c <- local (possiblyReAbsAll u u') $ do
+      ctx <- asks ctxt
+      trace ("after reabs " <> show (u,u') <> "\n, ctx = : " <> showCtxt ctx)
+      (checkInfer t)
     case c of
       VCPi f -> do return $ (capp f u')
       _          -> oops $ show t ++ " is not a family (1), but " ++ show c

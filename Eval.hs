@@ -27,21 +27,16 @@ lkCol i (PCol e (n@(j,_),v)) | i == j = (n,v)
 lkCol i Empty = error $ "Color " ++ show i ++ " not found"
 
 
-reAbsEnvOnCol :: Ident -> CVal -> Env -> Env
+reAbsEnvOnCol :: TColor -> Color -> Env -> Env
 reAbsEnvOnCol _x _ Empty = Empty
 reAbsEnvOnCol x i (Pair e (b,v)) = Pair (reAbsEnvOnCol x i e) (b, reabs)
-  where reabs = case i of
-          Infty -> clam'  $ \_ -> v
-          CVar j -> clam j v
-          (Zero) -> clam'  $ \_ -> v
+  where reabs = clam i v
 reAbsEnvOnCol x _i (PCol e ((x',_), _c)) | x == x' = e
 reAbsEnvOnCol x i (PCol e c) = PCol (reAbsEnvOnCol x i e) c
 reAbsEnvOnCol x i (PDef xas e) = PDef xas (reAbsEnvOnCol x i e) -- ???
 
-reAbsWholeEnvOnCol :: CTer -> Env -> Env
-reAbsWholeEnvOnCol (Zero) e = e
-reAbsWholeEnvOnCol Infty e = e
-reAbsWholeEnvOnCol (CVar i) e = reAbsEnvOnCol i (colEval e (CVar i)) e
+reAbsWholeEnvOnCol :: TColor -> Color -> Env -> Env
+reAbsWholeEnvOnCol x i e = reAbsEnvOnCol x i e
 
 reconstruct :: Val -> Color -> [(Color,Val,Color)] -> Val
 reconstruct v i edges = VSimplex ((i,v):[(j,f `app` v) | (i',f,j) <- edges, i'==i])
@@ -191,10 +186,12 @@ ceval :: Color -> CVal -> Val -> Val
 ceval i p v0 =
   let ev = ceval i p
   in case v0 of
+    COLOR -> COLOR
     (VPath a borders) -> VPath (ev a) [(j,ev b) | (cceval i p . CVar -> (CVar j),b) <- borders]
     -- (VSimplexT _ _ _) -> _
     -- (VSimplex _) -> _
-    -- (VLift _ _ _ _) -> _
+    (VLift projections x j _t) | i == j, p == Zero -> cevals projections x
+    (VLift projections x j t) -> VLift ((i,p):projections) x j t
     VU  -> VU
     Ter t env -> Ter t (cevalEnv i p env) -- add color projections!
     VPi a b -> VPi (ev a) (ev b)
