@@ -128,7 +128,8 @@ data Val = VU
          | VSimplexT [Color] [Val] [(Color,Val,Color)] -- A simplex in U. colors, types, functions from/to type
          | VSimplex  [(Color,Val)] -- A simplex. colors, values at each type (point)
          -- | Similar to a singleton type, but with borders
-         | VPath Val {- ^ This value is a family of types (ie. a function from color(s) to U) -} [(Color,Val)] {- borders -}
+         | VPath Val -- ^ the type    -- really a singleton type
+                 Val -- ^ the border
          | VLift [(Color,CVal)] Val Color Val
          | COLOR -- fake type for colors
 
@@ -293,12 +294,13 @@ instance Show Val where
   show = showVal $ namesFrom ['α'..'ω']
 
 showVal :: [String] -> Val -> String
+showVal [] _ = error "showVal: panic"
 showVal su@(s:ss) t0 = case t0 of
   VSimplexT is _ _ -> "Simplex" <+> show is
-  VSimplex xs -> "simplex" <+> show (map fst xs) <+> showVals su (map snd xs)
+  VSimplex xs -> "<" <> commas ["(" <> c <> "/" <> showVal su t <> ")" | (Color c,t) <- xs] <> ">"
   COLOR -> "COLOR"
   VU           -> "U"
-  (VPath a xs) -> ("ID("<> showVal su a <> ")") <+> ("[" <> commas ["(" <> c <> "/" <> showVal su t <> ")" | (Color c,t) <- xs] <> "]")
+  (VPath a xs) -> ("ID("<> showVal su a <> ")") <+> showVal su xs
   (VLift liftProjs a i t) -> showVal su a <+> ("↑" <> show i) <+> showVal su t <+> show liftProjs
   (Ter t env)  -> show t <+> show env
   (VCon c us)  -> c <+> showVals su us

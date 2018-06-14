@@ -3,11 +3,12 @@ module TypeChecker where
 
 import Data.Function
 import Data.List
-import Data.Monoid hiding (Sum)
+-- import Data.Monoid hiding (Sum)
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Except
 import Control.Monad.Trans.Reader
+import Control.Applicative
 
 import CTT
 import Eval
@@ -181,9 +182,9 @@ check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
   (VPi aa f,Lam x tt)  -> do
     var <- getFresh
     local (addTypeVal (x,aa)) $ check (app f var) tt
-  (VPath (VPi aa f) borders,Lam x tt)  -> do
+  (VPath (VPi aa f) borders,Lam x tt) -> do
     var <- getFresh
-    local (addTypeVal (x,aa)) $ check (VPath (app f var) [(i,b `app` var) | (i,b) <- borders]) tt
+    local (addTypeVal (x,aa)) $ check (VPath (app f var) (borders `app` var)) tt
   (VSigma aa f, SPair t1 t2) -> do
     v <- checkEval aa t1
     check (app f v) t2
@@ -270,15 +271,21 @@ colVarEval i = do
 checkInfer :: Ter -> Typing Val
 checkInfer e = do
   x <- checkInfer' e
-  trace ("Inferred: " <> show e <> " has type " <> show x)
+  -- trace ("Inferred: " <> show e <> " has type " <> show x)
   return x
 
--- inferTypeEval a = do
---   t <- inferType a
---   a' <- eval' a
---   case t of
---     VPath _ borders -> return [borders,a]
---     _ -> return a
+-- Infer a value's type and return its value AND all the values that it also is known to be thanks to its type.
+inferTypeEval :: Ter -> Typing [Val]
+inferTypeEval a = do
+  t <- inferType a
+  a' <- eval' a
+  case t of
+    VPath _ borders -> return [borders,a']
+    _ -> return [a']
+
+-- choiceA  :: (Foldable f, Alternative a) => f (a x) -> a x
+choiceA :: Alternative m => [x] -> (x -> m y) -> m y
+choiceA xs f = foldr (<|>) empty (map f xs)
 
 checkInfer' :: Ter -> Typing Val
 checkInfer' e = case e of
@@ -291,11 +298,11 @@ checkInfer' e = case e of
 
 -}
   Lift t i a -> do
-    _ <- inferType a
-    a' <- eval' a
+    as' <- inferTypeEval a
     i' <- colVarEval i
-    check (proj i' a') t
-    return a'
+    choiceA as' $ \a' -> do
+      check (proj i' a') t
+      return a'
   Path a ixs -> do
     a' <- checkEval VU a
     forM_ ixs $ \(i,x) -> do
@@ -358,12 +365,6 @@ checkInfer' e = case e of
     localM (addDecls d) $ checkInfer t
   _ -> oops ("cannot infer the type of " ++ show e)
 
-extractFun :: Int -> Val -> Typing ([Val],Val)
-extractFun 0 a = return ([],a)
-extractFun n (VPi a f) = do
-  (as,b) <- extractFun (n-1) (f `app` VVar "extractFun")
-  return (a:as,b)
-
 checks :: (Tele,Env) -> [Ter] -> Typing ()
 checks _              []     = return ()
 checks ((x,a):xas,nu) (e:es) = do
@@ -374,23 +375,3 @@ checks ((x,a):xas,nu) (e:es) = do
   checks (xas,Pair nu (x,v')) es
 checks _              _      = oops "checks"
 
--- Not used since we have U : U
---
--- (=?=) :: Typing Ter -> Ter -> Typing ()
--- m =?= s2 = do
---   s1 <- m
---   unless (s1 == s2) $ oops (show s1 ++ " =/= " ++ show s2)
---
--- checkTs :: [(String,Ter)] -> Typing ()
--- checkTs [] = return ()
--- checkTs ((x,a):xas) = do
---   checkType a
---   local (addType (x,a)) (checkTs xas)
---
--- checkType :: Ter -> Typing ()
--- checkType t = case t of
---   U              -> return ()
---   Pi a (Lam x b) -> do
---     checkType a
---     local (addType (x,a)) (checkType b)
---   _ -> checkInfer t =?= U

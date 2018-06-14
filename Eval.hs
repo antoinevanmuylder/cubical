@@ -104,11 +104,7 @@ eval _ (Undef _)       = error "undefined (2)"
 eval e (CLam x t) = clam' $ \i' -> eval (PCol e (x,i')) t
 eval e (CApp r s) = capp (eval e r) (colEval e s)
 eval e (CPi a) = VCPi (eval e a)
--- eval e (Rename c t) = case colEval e c of
---                         -- Zero   -> clam' $ \_ ->             (eval e t)
---                         -- Infty  -> clam' $ \_ ->             (eval e t)
---                         CVar i -> clam' $ \i' -> ceval i i' (eval e t)
-eval e (Path t xs) = VPath (eval e t) [(k,eval e z) | (colEval e . CVar -> CVar k,z) <- xs]
+eval e (Path t xs) = VPath (eval e t) (VSimplex [(k,eval e z) | (colEval e . CVar -> CVar k,z) <- xs])
 
 envColors :: Env -> [(Binder,CVal)]
 envColors = \case
@@ -182,14 +178,17 @@ cceval :: Color -> CVal -> CVal -> CVal
 cceval i p (CVar k) | k == i = p
 cceval _ _ a = a
 
+simplex [(_,v)] = v
+simplex x = VSimplex x
+
 ceval :: Color -> CVal -> Val -> Val
 ceval i p v0 =
   let ev = ceval i p
   in case v0 of
     COLOR -> COLOR
-    (VPath a borders) -> VPath (ev a) [(j,ev b) | (cceval i p . CVar -> (CVar j),b) <- borders]
+    (VPath a borders) -> VPath (ev a) (ev borders)
     -- (VSimplexT _ _ _) -> _
-    -- (VSimplex _) -> _
+    (VSimplex borders) -> simplex [(j,ev b) | (cceval i p . CVar -> (CVar j),b) <- borders]
     (VLift projections x j _t) | i == j, p == Zero -> cevals projections x
     (VLift projections x j t) -> VLift ((i,p):projections) x j t
     VU  -> VU
@@ -265,8 +264,16 @@ capps :: Val -> [CVal] -> Val
 capps a [] = a
 capps a (i:is) = capps (capp a i) is
 
+
+-- | Decompose a value in a number of colors and zip it with a simplex.
+type Simplex a = [(Color,a)]
+simplexZip :: (x -> Val -> a) -> Simplex x -> Val -> Simplex a
+simplexZip f s t = [(i,f si (projs (cols \\ [i]) t)) | (i,si) <- s]
+  where cols = map fst s
+
 app :: Val -> Val -> Val
--- <f,g>@i u = [f u(i0), g <i>u]@i
+app (VSimplex f) u = VSimplex (simplexZip app f u)
+-- app u (VSimplex t) = VSimplex (simplexZip (flip app) t u)
 app (VLam f) u = f u
 -- app (Ter (Lam cs x t) e) u = eval (Pair e (x,clams cs u)) t
 app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
@@ -315,6 +322,8 @@ conv k (VCLam f) t = conv (k+1) (f c) (capp t c)
   where c = mkCol k
 conv k t (VCLam f) = conv k (VCLam f) t
 conv k (VCApp a b) (VCApp a' b') = conv k a a' <> equal b b'
+conv k (VSimplex x) y = mconcat $ map snd $ simplexZip (conv k) x y
+conv k y (VSimplex x) = mconcat $ map snd $ simplexZip (flip (conv k)) x y
 -- conv k (Ter (Lam cs x u) e) (Ter (Lam cs' x' u') e') = do
 --   let v = mkVar k
 --   cs `equal` cs' <> conv (k+1) (eval (Pair e (x,v)) u) (eval (Pair e' (x',v)) u')
@@ -356,12 +365,9 @@ convEnv k e e' = mconcat $ zipWith (conv k) (valOfEnv e) (valOfEnv e')
 subset :: Eq a => [a] -> [a] -> Bool
 subset x y = null (x \\ y)
 
--- TODO: not excellent, should be done as a proper singleton type with a simplex.
 sub :: Int -> [Val] -> Val -> Val -> Err
-sub k value (VPath q gs) (VPath p fs) | map fst fs `subset` map fst gs
-  = sub k value q p <> mconcat [conv k f g | (i,f) <- fs, let Just g = lookup i gs]
-sub k value (VPath p _) q = sub k value p q
-sub k value q (VPath p fs) = sub k value q p <> anyOf [mconcat [conv k (proj i v) f | (i,f) <- fs] | v <- value]
+sub k value (VPath p x) q = sub k (x:value) p q
+sub k value q (VPath p x) = sub k value q p <> anyOf [conv k x v | v <- value]
 sub k x (VCPi f) (VCPi f') = sub (k+1) ((`capp` v) <$> x) (f `capp` v) (f' `capp` v)
   where v = mkCol k
 sub k _ subt super = conv k subt super

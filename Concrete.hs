@@ -163,7 +163,7 @@ resolveColor (CVar x) = C.CVar <$> resolveCVar x
 mcols :: MCols -> [AIdent]
 mcols NoCols = []
 mcols (Cols xs) = xs
-                 
+
 resolveMCols :: MCols -> Resolver [C.TColor]
 resolveMCols NoCols = return []
 resolveMCols (Cols xs) = forM xs $ \x -> resolveCVar x
