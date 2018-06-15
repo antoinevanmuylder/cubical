@@ -65,10 +65,21 @@ lift ps v i t =
    (VCPi f) -> VCLam $ \j -> lft (v `capp` j) (f `capp` j)
    (VCLam _) -> error "lift: not a type (VCLam)"
    (VCApp _ _) -> suspended
-   (VSimplex _) -> error "lift: not a type (VSimplex)"
-   -- (VPath t' _) -> lft v t' -- FIXME: add the appropriate number of CPis in front of t'
+   (VPath t' _) -> lft v t'
    (VLift _ _ _ _) -> suspended
+   VSim ts -> vsim' (filter isntSimplex $ map (lift ps v i) ts)
+   -- HACK: removing the simplices here. Simplices occur becaue we can have:
+   -- Z : U <i/X> <j/Y>
+   -- and so eval Z = <X,Y>
+   -- We do this evaluation because we want Z@i@0 = X
+   -- However this value isn't usable to do a lift.
+   -- But on the other hand we can simply block and wait for the variable Z  to be substituted for a proper path between X and Y.
+   _ -> suspended
 
+isntSimplex :: Val -> Bool
+isntSimplex (VSimplex _) = False
+isntSimplex _ = True
+  
 eval :: Env -> Ter -> Val
 eval _e U              = VU
 eval e (Lift s i t) = case colEval e (CVar i) of
@@ -128,13 +139,15 @@ cevals :: [(Color,CVal)] -> Val -> Val
 cevals [] = id
 cevals ((i,j):xs) = ceval i j . cevals xs
 
+vsim' :: [Val] -> Val
+vsim' [x] = x
+vsim' x = VSim x
+
 vsim :: Val -> Val -> Val
-vsim (VSim xs) (VSim ys) = VSim (xs++ys)
-vsim (VSim []) x = x
-vsim x (VSim []) = x
-vsim (VSim xs) x = VSim (x:xs)
-vsim x (VSim xs) = VSim (x:xs)
-vsim x y = VSim [x,y]
+vsim (VSim xs) (VSim ys) = vsim' (xs++ys)
+vsim (VSim xs) x = vsim' (x:xs)
+vsim x (VSim xs) = vsim' (x:xs)
+vsim x y = vsim' [x,y]
 
 -- substEnv :: Color -> CVal -> Env -> Env
 -- substEnv i p env0 = case env0 of

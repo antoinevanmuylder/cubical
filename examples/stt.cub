@@ -1,6 +1,5 @@
 module stt where
 
-
 Eq : (A : U) -> (x y : A) -> U
 Eq A x y = forall i j. ID (A) [i/x,j/y]
 

@@ -114,7 +114,7 @@ runDeclss tenv (d:ds) = do
     Left s      -> return (Just s, tenv)
 
 runInfer :: TEnv -> Ter -> IO (Either String Val)
-runInfer lenv e = runTyping lenv (checkInfer e)
+runInfer lenv e = runTyping lenv (snd <$> checkInfer e)
 
 -- Extract the type of a label as a closure
 getLblType :: String -> Val -> Typing (Tele, Env)
@@ -168,8 +168,8 @@ check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
         -- trace ("after reabs " <> show (i,i') <> "\n, context became \n" <> showCtxt ctx)
         checkLogg (cpi $ \j -> ceval i' j a) u
       _ -> logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
-          v <- checkInfer t
-          checkSub "inferred type" [] v a -- if not a variable, fall back to plain inference
+          (t',v) <- checkInfer t
+          checkSub "inferred type" [t'] v a -- if not a variable, fall back to plain inference
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
   (VPi (Ter (Sum _ cas) nu) f,Split _ ces) -> do
     let cas' = sortBy (compare `on` fst . fst) cas
@@ -196,8 +196,7 @@ check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
   (_,Undef _) -> return ()
   _ -> do
     logg ("checking that term " ++ show t ++ " has type " ++ show a) $ do
-       v <- checkInfer t
-       x <- eval <$> asks env <*> pure t
+       (x,v) <- checkInfer t
        checkSub "inferred type" [x] v a
 
 
@@ -219,17 +218,16 @@ checkEval :: Val -> Ter -> Typing Val
 checkEval a t = do
   checkLogg a t
   x <- eval' t
-  case a of
+  t' <- case a of
     VPath _ y -> return (vsim x y)
     _ -> return x
+  trace ("Checked: " <> show t <> " is " <> show t' <> " with type " <> show a)
+  return t'
 
 eval' :: Ter -> Typing Val
 eval' t = do
   e <- asks env
   return $ eval e t
-
--- checkConvs :: String -> [Val] -> [Val] -> Typing ()
--- checkConvs msg a v = sequence_ [checkConv msg a' v' | (a',v') <- zip a v]
 
 checkSub :: [Char] -> [Val] -> Val -> Val -> ReaderT TEnv (ExceptT String IO) ()
 checkSub msg value subtyp super = do
@@ -257,7 +255,7 @@ checkBranch (xas,nu) f (c,(xs,e)) = do
 
 inferTypeEval :: Ter -> Typing (Val,Val)
 inferTypeEval t = do
-  (t',a) <- checkInferEval t
+  (t',a) <- checkInfer t
   case a of
    VU -> return (t',a)
    VPath VU _ -> return (t',a)
@@ -271,16 +269,14 @@ colVarEval i = do
   return i'
 
 -- Infer a value's type and return its value AND all the values that it also is known to be thanks to its type.
-checkInferEval :: Ter -> Typing (Val,Val)
-checkInferEval e = do
-  (a',t) <- checkInfer' e
-  trace ("Inferred: " <> show e <> " has type " <> show t)
-  case t of
-    VPath _ borders -> return (vsim borders a',t)
-    _ -> return (a',t)
-
 checkInfer :: Ter -> Typing (Val,Val)
-checkInfer t = checkInferEval t
+checkInfer e = do
+  x@(e',t) <- checkInfer' e
+  r <- case t of
+    (VPath _ border) -> return (vsim e' border,t)
+    _ -> return x
+  trace ("Inferred: " <> show e <> " is " <> show r)
+  return r
 
 inferType :: Ter -> Typing Val
 inferType a = do
@@ -292,7 +288,11 @@ inferType a = do
 -- choiceA xs f = foldr (<|>) empty (map f xs)
 
 checkInfer' :: Ter -> Typing (Val,Val)
-checkInfer' e = case e of
+checkInfer' e =
+  let typ = do
+        rho <- asks env
+        return (eval rho e, VU)
+  in case e of
 {-
    Γ ⊢ A : U
    Γ ⊢ t : A[0/i]
@@ -314,52 +314,53 @@ checkInfer' e = case e of
   CPi (CLam x t) -> do
     var <- getFreshCol
     _ <- local (addCol x var) $ inferType t
-    return VU
+    typ
   CLam i t -> do -- additional rule to infer CLam
     var@(CVar v) <- getFreshCol
-    a <- local (addCol i var) $ checkInfer t
-    return (cpi $ \i' -> ceval v i' a)
+    (t',a) <- local (addCol i var) $ checkInfer t
+    return (clam' $ \i' -> ceval v i' t', cpi $ \i' -> ceval v i' a)
   Pi a (Lam x b) -> do
     _ <- inferType a
-    localM (addType (x,a)) $ inferType b
+    _ <- localM (addType (x,a)) $ inferType b
+    typ
   Sigma a (Lam x b) -> do
     _ <- inferType a
-    localM (addType (x,a)) $ inferType b
-  U -> return VU                 -- U : U
+    _ <- localM (addType (x,a)) $ inferType b
+    typ
+  U -> typ
   Var n -> do
+    n' <- eval' (Var n)
     gam <- ctxt <$> ask
     case getIdent n gam of
-      Just v  -> return v
+      Just v  -> return (n',v)
       Nothing -> oops $ show n ++ " is not declared!"
   App t u -> do
-    c <- checkInfer t
+    (t',c) <- checkInfer t
     case c of
       VPi a f -> do
         v <- checkEval a u
         trace ("in app: " ++ show v ++ " :: " ++ show a)
-        return $ app f v
-      _       -> oops $ show c ++ " is not a product"
+        return $ (app t' v, app f v)
+      _       -> oops $ show t' ++ " is not a product"
   Fst t -> do
-    c <- checkInfer t
+    (t',c) <- checkInfer t
     case c of
-      VSigma a _f -> return a
-      _          -> oops $ show c ++ " is not a sigma-type"
+      VSigma a _f -> return (fstSVal t',a)
+      _ -> oops $ show c ++ " is not a sigma-type"
   Snd t -> do
-    c <- checkInfer t
+    (v,c) <- checkInfer t
     case c of
       VSigma _a f -> do
-        rho <- asks env
-        let v = eval rho t
-        return $ app f (fstSVal v)
+        return $ (sndSVal v, app f (fstSVal v))
       _          -> oops $ show c ++ " is not a sigma-type"
   CApp t u -> do
     u' <- colorEval u
-    c <- local (possiblyReAbsAll u u') $ do
+    (t',c) <- local (possiblyReAbsAll u u') $ do
       -- ctx <- asks ctxt
       -- trace ("after reabs " <> show (u,u') <> "\n, context became \n" <> showCtxt ctx)
       (checkInfer t)
     case c of
-      VCPi f -> do return $ (capp f u')
+      VCPi f -> do return $ (capp t' u', capp f u')
       _          -> oops $ show t ++ " is not a family (1), but " ++ show c
   Where t d -> do
     checkDecls d
