@@ -151,16 +151,22 @@ checkTele ((x,a):xas) = do
   _ <- inferType a
   localM (addType (x,a)) $ checkTele xas
 
-checkLogg :: Val -> Ter -> Typing ()
+checkLogg :: Val -> Ter -> Typing Val
 checkLogg v t = logg ("Checking that " ++ show t ++ " has type " ++ show v) $ check v t
 
-check :: Val -> Ter -> Typing ()
+check :: Val -> Ter -> Typing Val
 check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
-  case (a,t) of
+ let dflt = eval' t
+ in case (a,t) of
   (_,Con c es) -> do
     (bs,nu) <- getLblType c a
     checks (bs,nu) es
-  (_,CApp u c) -> do
+    dflt
+  (_,CApp u@(CLam _ _) c) -> do
+    -- we prefer to infer type for CApp, because then we also get a
+    -- (possibly precise) value.  however, if we have a lambda inside
+    -- then we wont be able to infer. But, we're still able to check
+    -- and so we proceed here
     c' <- colorEval c
     case (c,c') of
       (CVar i,CVar i') -> local (reAbsAll i i') $ do
@@ -170,34 +176,43 @@ check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
       _ -> logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
           (t',v) <- checkInfer t
           checkSub "inferred type" [t'] v a -- if not a variable, fall back to plain inference
-  (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
+          return t'
+  (VU,Sum _ bs) -> do
+    sequence_ [checkTele as | (_,as) <- bs]
+    dflt
   (VPi (Ter (Sum _ cas) nu) f,Split _ ces) -> do
     let cas' = sortBy (compare `on` fst . fst) cas
         ces' = sortBy (compare `on` fst) ces
-    if map (fst . fst) cas' == map fst ces'
+    _ <- if map (fst . fst) cas' == map fst ces'
        then sequence_ [ checkBranch (as,nu) f brc
                       | (brc, (_,as)) <- zip ces' cas' ]
        else oops "case branches does not match the data type"
+    dflt
   (VPi aa f,Lam x tt)  -> do
     var <- getFresh
-    local (addTypeVal (x,aa)) $ check (app f var) tt
+    _ <- local (addTypeVal (x,aa)) $ check (app f var) tt
+    dflt
   (VPath (VPi aa f) borders,Lam x tt) -> do
     var <- getFresh
-    local (addTypeVal (x,aa)) $ check (VPath (app f var) (borders `app` var)) tt
+    _ <- local (addTypeVal (x,aa)) $ check (VPath (app f var) (borders `app` var)) tt
+    dflt
   (VSigma aa f, SPair t1 t2) -> do
-    v <- checkEval aa t1
-    check (app f v) t2
+    v <- check aa t1
+    v2 <- check (app f v) t2
+    return (VSPair v v2)
   (VCPi f, CLam x b) -> do
     var <- getFreshCol
-    local (addCol x var) $ check (capp f var) b
+    _ <- local (addCol x var) $ check (capp f var) b
+    dflt
   (_,Where e d) -> do
     checkDecls d
     localM (addDecls d) $ check a e
-  (_,Undef _) -> return ()
+  (_,Undef _) -> error "undefined (3)"
   _ -> do
     logg ("checking that term " ++ show t ++ " has type " ++ show a) $ do
        (x,v) <- checkInfer t
        checkSub "inferred type" [x] v a
+       return x
 
 
 arrs :: [Val] -> Val -> Val
@@ -213,16 +228,6 @@ colorEval :: CTer -> Typing CVal
 colorEval c = do
   e <- asks env
   return $ colEval e c
-
-checkEval :: Val -> Ter -> Typing Val
-checkEval a t = do
-  checkLogg a t
-  x <- eval' t
-  t' <- case a of
-    VPath _ y -> return (vsim x y)
-    _ -> return x
-  trace ("Checked: " <> show t <> " is " <> show t' <> " with type " <> show a)
-  return t'
 
 eval' :: Ter -> Typing Val
 eval' t = do
@@ -251,7 +256,8 @@ checkBranch (xas,nu) f (c,(xs,e)) = do
   -- env <- asks env
   let l  = length xas
       us = map mkVar [k..k+l-1]
-  localM (addBranch (zip xs us) (xas,nu)) $ check (app f (VCon c us)) e
+  _ <- localM (addBranch (zip xs us) (xas,nu)) $ check (app f (VCon c us)) e
+  return ()
 
 inferTypeEval :: Ter -> Typing (Val,Val)
 inferTypeEval t = do
@@ -275,7 +281,7 @@ checkInfer e = do
   r <- case t of
     (VPath _ border) -> return (vsim e' border,t)
     _ -> return x
-  trace ("Inferred: " <> show e <> " is " <> show r)
+  -- trace ("Inferred: " <> show e <> " is " <> show r)
   return r
 
 inferType :: Ter -> Typing Val
@@ -302,13 +308,13 @@ checkInfer' e =
   Lift t i a -> do
     (a',_) <- inferTypeEval a
     i' <- colVarEval i
-    t' <- checkEval (proj i' a') t
+    t' <- check (proj i' a') t
     return (Eval.lift [] t' i' a', a')
   Path a ixs -> do
-    a' <- checkEval VU a
+    a' <- check VU a
     ixs' <- forM ixs $ \(i,x) -> do
       i' <- colVarEval i
-      x' <- checkEval (proj i' a') x
+      x' <- check (proj i' a') x
       return (i',x')
     return (VPath a' (VSimplex ixs'),VU)
   CPi (CLam x t) -> do
@@ -338,8 +344,8 @@ checkInfer' e =
     (t',c) <- checkInfer t
     case c of
       VPi a f -> do
-        v <- checkEval a u
-        trace ("in app: " ++ show v ++ " :: " ++ show a)
+        v <- check a u
+        -- trace ("in app: " ++ show v ++ " :: " ++ show a)
         return $ (app t' v, app f v)
       _       -> oops $ show t' ++ " is not a product"
   Fst t -> do
@@ -371,9 +377,7 @@ checks :: (Tele,Env) -> [Ter] -> Typing ()
 checks _              []     = return ()
 checks ((x,a):xas,nu) (e:es) = do
   let v = eval nu a
-  check v e
-  rho <- asks env
-  let v' = eval rho e
+  v' <- check v e
   checks (xas,Pair nu (x,v')) es
 checks _              _      = oops "checks"
 
