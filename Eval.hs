@@ -128,6 +128,14 @@ cevals :: [(Color,CVal)] -> Val -> Val
 cevals [] = id
 cevals ((i,j):xs) = ceval i j . cevals xs
 
+vsim :: Val -> Val -> Val
+vsim (VSim xs) (VSim ys) = VSim (xs++ys)
+vsim (VSim []) x = x
+vsim x (VSim []) = x
+vsim (VSim xs) x = VSim (x:xs)
+vsim x (VSim xs) = VSim (x:xs)
+vsim x y = VSim [x,y]
+
 -- substEnv :: Color -> CVal -> Env -> Env
 -- substEnv i p env0 = case env0 of
 --   Empty -> Empty
@@ -206,15 +214,7 @@ ceval i p v0 =
     VCPi x -> VCPi (ev x)
     VCLam a -> VCLam (\k -> ev $ a k)
     VLam f -> VLam (ev . f)
-
-
-
--- sh2 :: (Val -> Val -> Val) -> Val -> Val -> Val
--- sh2 f a b = f a b
-
--- sh2' :: (Val -> a -> Val) -> Val -> a -> Val
--- sh2' f a b = f a b
-
+    VSim xs -> VSim (fmap ev xs)
 
 proj :: Color -> Val -> Val
 proj i v = clam' (\j -> ceval i j v)  `capp` Zero
@@ -241,22 +241,14 @@ cpis :: Int -> ([CVal] -> Val) -> Val
 cpis 0 t = t []
 cpis n t = VCPi $ clam' $ \i -> cpis (n-1) $ \is -> t (i:is)
 
--- cpi :: Color -> Val -> Val
--- cpi i t = VCPi $ clam i t
-
 cpi :: (CVal -> Val) -> Val
 cpi f = VCPi (VCLam f)
 
--- revCPis :: Int -> Val -> Maybe (\[CVal] -> Val)
--- revCPis 0 v = Just (\[] -> v)
--- revCPis 0 (CPi f) = Just (\[] -> v)
+(<∋>) :: Functor f => f a -> (a -> b) -> f b
+(<∋>) = flip fmap
 
--- fc :: Int -> [a] -> a
--- fc n as | n < length as = as !! n
--- fc _ _ = error "Attempt to access non-existing face"
-
-  
 capp :: Val -> CVal -> Val
+capp (VSim xs) i = VSim (xs <∋> (`capp` i))
 capp (VCLam f) x = f x
 capp f a = VCApp f a
 
@@ -312,6 +304,8 @@ instance Monoid Err where
   mempty = NoErr
 
 conv :: Int -> Val -> Val -> Err
+conv k (VSim xs) y = anyOf [conv k x y | x <- xs]
+conv k y (VSim xs) = anyOf [conv k y x | x <- xs]
 conv _ VU VU = NoErr
 conv k (VLam f) t = conv (k+1) (f v) (t `app` v)
   where v = mkVar k

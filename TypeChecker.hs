@@ -3,12 +3,11 @@ module TypeChecker where
 
 import Data.Function
 import Data.List
--- import Data.Monoid hiding (Sum)
+import Data.Monoid hiding (Sum)
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Except
 import Control.Monad.Trans.Reader
-import Control.Applicative
 
 import CTT
 import Eval
@@ -62,7 +61,7 @@ silentEnv  = TEnv 0 Empty [] [] False
 
 addCol :: Binder -> CVal -> TEnv -> TEnv
 addCol x p@(CVar _) (TEnv k rho gam ex v) = TEnv (k+1) (PCol rho (x,p)) ((x,COLOR):gam) ex v
-addCol _ _ _ = error "typechecker can't add Zero (because of Lift checking)" 
+addCol _ _ _ = error "typechecker can't add Zero (because of Lift checking)"
 
 addTypeVal :: (Binder, Val) -> TEnv -> TEnv
 addTypeVal p@(x,_) (TEnv k rho gam ex v) =
@@ -215,11 +214,14 @@ colorEval :: CTer -> Typing CVal
 colorEval c = do
   e <- asks env
   return $ colEval e c
-  
+
 checkEval :: Val -> Ter -> Typing Val
 checkEval a t = do
   checkLogg a t
-  eval' t
+  x <- eval' t
+  case a of
+    VPath _ y -> return (vsim x y)
+    _ -> return x
 
 eval' :: Ter -> Typing Val
 eval' t = do
@@ -253,12 +255,12 @@ checkBranch (xas,nu) f (c,(xs,e)) = do
       us = map mkVar [k..k+l-1]
   localM (addBranch (zip xs us) (xas,nu)) $ check (app f (VCon c us)) e
 
-inferType :: Ter -> Typing Val
-inferType t = do
-  a <- checkInfer t
+inferTypeEval :: Ter -> Typing (Val,Val)
+inferTypeEval t = do
+  (t',a) <- checkInferEval t
   case a of
-   VU -> return a
-   VPath VU _ -> return a
+   VU -> return (t',a)
+   VPath VU _ -> return (t',a)
    _ -> oops $ show t ++ " is not a type, but " ++ show a
 
 colVarEval :: TColor -> Typing Color
@@ -268,47 +270,47 @@ colVarEval i = do
   let CVar i' = colEval rho (CVar i)
   return i'
 
-checkInfer :: Ter -> Typing Val
-checkInfer e = do
-  x <- checkInfer' e
-  -- trace ("Inferred: " <> show e <> " has type " <> show x)
-  return x
-
 -- Infer a value's type and return its value AND all the values that it also is known to be thanks to its type.
-inferTypeEval :: Ter -> Typing [Val]
-inferTypeEval a = do
-  t <- inferType a
-  a' <- eval' a
+checkInferEval :: Ter -> Typing (Val,Val)
+checkInferEval e = do
+  (a',t) <- checkInfer' e
+  trace ("Inferred: " <> show e <> " has type " <> show t)
   case t of
-    VPath _ borders -> return [borders,a']
-    _ -> return [a']
+    VPath _ borders -> return (vsim borders a',t)
+    _ -> return (a',t)
+
+checkInfer :: Ter -> Typing (Val,Val)
+checkInfer t = checkInferEval t
+
+inferType :: Ter -> Typing Val
+inferType a = do
+  (_,t) <- inferTypeEval a
+  return t
 
 -- choiceA  :: (Foldable f, Alternative a) => f (a x) -> a x
-choiceA :: Alternative m => [x] -> (x -> m y) -> m y
-choiceA xs f = foldr (<|>) empty (map f xs)
+-- choiceA :: Alternative m => [x] -> (x -> m y) -> m y
+-- choiceA xs f = foldr (<|>) empty (map f xs)
 
-checkInfer' :: Ter -> Typing Val
+checkInfer' :: Ter -> Typing (Val,Val)
 checkInfer' e = case e of
 {-
-
    Γ ⊢ A : U
    Γ ⊢ t : A[0/i]
 ---------------------
    Γ ⊢ t ^i A : A
-
 -}
   Lift t i a -> do
-    as' <- inferTypeEval a
+    (a',_) <- inferTypeEval a
     i' <- colVarEval i
-    choiceA as' $ \a' -> do
-      check (proj i' a') t
-      return a'
+    t' <- checkEval (proj i' a') t
+    return (Eval.lift [] t' i' a', a')
   Path a ixs -> do
     a' <- checkEval VU a
-    forM_ ixs $ \(i,x) -> do
+    ixs' <- forM ixs $ \(i,x) -> do
       i' <- colVarEval i
-      check (proj i' a') x
-    return VU
+      x' <- checkEval (proj i' a') x
+      return (i',x')
+    return (VPath a' (VSimplex ixs'),VU)
   CPi (CLam x t) -> do
     var <- getFreshCol
     _ <- local (addCol x var) $ inferType t
@@ -333,9 +335,8 @@ checkInfer' e = case e of
     c <- checkInfer t
     case c of
       VPi a f -> do
-        checkLogg a u
-        rho <- asks env
-        let v = eval rho u
+        v <- checkEval a u
+        trace ("in app: " ++ show v ++ " :: " ++ show a)
         return $ app f v
       _       -> oops $ show c ++ " is not a product"
   Fst t -> do

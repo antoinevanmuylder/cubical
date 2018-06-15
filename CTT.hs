@@ -132,6 +132,7 @@ data Val = VU
                  Val -- ^ the border
          | VLift [(Color,CVal)] Val Color Val
          | COLOR -- fake type for colors
+         | VSim [Val] -- simul
 
   -- deriving Eq
 
@@ -296,6 +297,7 @@ instance Show Val where
 showVal :: [String] -> Val -> String
 showVal [] _ = error "showVal: panic"
 showVal su@(s:ss) t0 = case t0 of
+  VSim xs -> "{" <> commas (map (showVal su) xs) <> "}"
   VSimplexT is _ _ -> "Simplex" <+> show is
   VSimplex xs -> "<" <> commas ["(" <> c <> "/" <> showVal su t <> ")" | (Color c,t) <- xs] <> ">"
   COLOR -> "COLOR"
