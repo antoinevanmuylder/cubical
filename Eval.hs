@@ -311,9 +311,11 @@ different a b = Err $ show a ++ " /= " ++ show b
 
 data Err = Err String | NoErr deriving Show
 
+instance Semigroup Err where
+  NoErr <> x = x
+  Err x <> _ = Err x
+
 instance Monoid Err where
-  NoErr `mappend` x = x
-  Err x `mappend` _ = Err x
   mempty = NoErr
 
 conv :: Int -> Val -> Val -> Err
