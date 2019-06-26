@@ -1,4 +1,10 @@
-with (import <nixpkgs> {}).pkgs;
+{ nixpkgs ? import <nixpkgs> {}
+
+ }:
+let nixpkgs_source =
+fetchTarball "https://github.com/NixOS/nixpkgs-channels/archive/nixos-19.03.tar.gz";
+  nixpkgs' = (import nixpkgs_source){};
+in with nixpkgs'.pkgs;
 let pkg = haskellPackages.callPackage
             ({ mkDerivation, alex, array, base, BNFC, directory, filepath
              , happy, haskeline, mtl, stdenv, transformers
