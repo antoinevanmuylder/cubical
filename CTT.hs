@@ -132,7 +132,7 @@ data Val = VU
                  Val -- ^ the border
          | VLift [(Color,CVal)] Val Color Val
          | COLOR -- fake type for colors
-         | VSim [Val] -- simul
+         | VSim [Val] -- simultaneously several things
 
   -- deriving Eq
 
