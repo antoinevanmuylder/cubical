@@ -51,11 +51,11 @@ subst : (A : U) -> (x y : A) -> Eq A x y -> (P : A -> U) -> P x -> P y
 subst A x y Z P p = (p ^j (P (Z@i@j)))[0/i][+/j]
 
 
-J : (A : U)
-    (M : A)
-    (C : (y : A) -> (forall i j. (A)<i/M,j/y>) -> U)
-    (d : C M (<i j> M))
-    (N : A)
-    (e : forall i j. (A)<i/M,j/N>) ->
-    C N e
-J = (d ^j C (e@+@j) (<i k> e@i@j))[0/j]
+-- J : (A : U)
+--     (M : A)
+--     (C : (y : A) -> (forall i j. (A)<i/M,j/y>) -> U)
+--     (d : C M (<i j> M))
+--     (N : A)
+--     (e : forall i j. (A)<i/M,j/N>) ->
+--     C N e
+-- J = (d ^j C (e@+@j) (<i k> e@i@j))[0/j]

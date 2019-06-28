@@ -279,7 +279,7 @@ checkInfer :: Ter -> Typing (Val,Val)
 checkInfer e = do
   x@(e',t) <- checkInfer' e
   r <- case t of
-    (VPath _ border) -> return (vsim e' border,t)
+    (VPath _ border) -> return (vRemBorder e' border,t)
     _ -> return x
   -- trace ("Inferred: " <> show e <> " is " <> show r)
   return r

@@ -6,7 +6,7 @@
 module Eval where
 
 import CTT
-import Data.Monoid hiding (Sum)
+-- import Data.Monoid hiding (Sum)
 import Data.List 
 
 look :: Ident -> Env -> (Binder, Val)
@@ -65,20 +65,15 @@ lift ps v i t =
    (VCPi f) -> VCLam $ \j -> lft (v `capp` j) (f `capp` j)
    (VCLam _) -> error "lift: not a type (VCLam)"
    (VCApp _ _) -> suspended
-   (VPath t' _) -> lft v t'
+   (VPath t' _) -> lft v t' -- FIXME!
    (VLift _ _ _ _) -> suspended
-   VSim ts -> vsim' (filter isntSimplex $ map (lift ps v i) ts)
-   -- HACK: removing the simplices here. Simplices occur becaue we can have:
+   VRemBorder t' _ -> lft v t'
+   -- Ignoring the border here. They occur becaue we can have:
    -- Z : U <i/X> <j/Y>
-   -- and so eval Z = <X,Y>
+   -- and so eval Z = VRemBorder ... <X,Y>
    -- We do this evaluation because we want Z@i@0 = X
-   -- However this value isn't usable to do a lift.
-   -- But on the other hand we can simply block and wait for the variable Z  to be substituted for a proper path between X and Y.
+   -- However the borders are not usable to do a lift.
    _ -> suspended
-
-isntSimplex :: Val -> Bool
-isntSimplex (VSimplex _) = False
-isntSimplex _ = True
   
 eval :: Env -> Ter -> Val
 eval _e U              = VU
@@ -139,16 +134,6 @@ cevals :: [(Color,CVal)] -> Val -> Val
 cevals [] = id
 cevals ((i,j):xs) = ceval i j . cevals xs
 
-vsim' :: [Val] -> Val
-vsim' [x] = x
-vsim' x = VSim x
-
-vsim :: Val -> Val -> Val
-vsim (VSim xs) (VSim ys) = vsim' (xs++ys)
-vsim (VSim xs) x = vsim' (x:xs)
-vsim x (VSim xs) = vsim' (x:xs)
-vsim x y = vsim' [x,y]
-
 -- substEnv :: Color -> CVal -> Env -> Env
 -- substEnv i p env0 = case env0 of
 --   Empty -> Empty
@@ -199,8 +184,17 @@ cceval :: Color -> CVal -> CVal -> CVal
 cceval i p (CVar k) | k == i = p
 cceval _ _ a = a
 
+simplex :: [(Color, Val)] -> Val
 simplex [(_,v)] = v
 simplex x = VSimplex x
+
+vRemBorder :: Val -> [(Color, Val)] -> Val
+vRemBorder _ [(_,v)] = v -- HACK: ignore the main value if the border is known.
+vRemBorder x ys = VRemBorder x ys
+
+vSimplexT :: [Color] -> [Val] -> [(Color, Val, Color)] -> Val
+vSimplexT _ [t] _ = t
+vSimplexT is ts edges = VSimplexT is ts edges
 
 ceval :: Color -> CVal -> Val -> Val
 ceval i p v0 =
@@ -208,7 +202,9 @@ ceval i p v0 =
   in case v0 of
     COLOR -> COLOR
     (VPath a borders) -> VPath (ev a) (ev borders)
-    -- (VSimplexT _ _ _) -> _
+    (VSimplexT is tys edges) -> vSimplexT is' tys' edges'
+     where (is',tys') = unzip [(i',ev ty) | (cceval i p . CVar -> (CVar i'),ty) <- zip is tys]
+           edges' = [(i',ev f,j') | (cceval i p . CVar -> (CVar i'),f,cceval i p . CVar -> (CVar j')) <- edges]
     (VSimplex borders) -> simplex [(j,ev b) | (cceval i p . CVar -> (CVar j),b) <- borders]
     (VLift projections x j _t) | i == j, p == Zero -> cevals projections x
     (VLift projections x j t) -> VLift ((i,p):projections) x j t
@@ -227,7 +223,8 @@ ceval i p v0 =
     VCPi x -> VCPi (ev x)
     VCLam a -> VCLam (\k -> ev $ a k)
     VLam f -> VLam (ev . f)
-    VSim xs -> VSim (fmap ev xs)
+    VRemBorder t b -> vRemBorder (ev t) b' where VSimplex b' = ev (VSimplex b)
+
 
 proj :: Color -> Val -> Val
 proj i v = clam' (\j -> ceval i j v)  `capp` Zero
@@ -261,7 +258,6 @@ cpi f = VCPi (VCLam f)
 (<∋>) = flip fmap
 
 capp :: Val -> CVal -> Val
-capp (VSim xs) i = VSim (xs <∋> (`capp` i))
 capp (VCLam f) x = f x
 capp f a = VCApp f a
 
@@ -319,8 +315,8 @@ instance Monoid Err where
   mempty = NoErr
 
 conv :: Int -> Val -> Val -> Err
-conv k (VSim xs) y = anyOf [conv k x y | x <- xs]
-conv k y (VSim xs) = anyOf [conv k y x | x <- xs]
+conv k (VRemBorder x _) y = conv k x y
+conv k y (VRemBorder x _) = conv k y x
 conv _ VU VU = NoErr
 conv k (VLam f) t = conv (k+1) (f v) (t `app` v)
   where v = mkVar k
