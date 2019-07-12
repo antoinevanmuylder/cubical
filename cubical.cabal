@@ -12,8 +12,7 @@ license-file:        LICENSE
 author:              Cyril Cohen, Thierry Coquand, Simon Huber, Anders Mörtberg
 maintainer:          mortberg@chalmers.se
 category:            Dependent Types
-build-type:          Custom
-cabal-version:       >=1.10
+build-type:          Simple
 
 executable cubical
   main-is:             Main.hs
