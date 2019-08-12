@@ -6,7 +6,6 @@
 module Eval where
 
 import CTT
-import Data.Monoid hiding (Sum)
 import Data.List 
 
 look :: Ident -> Env -> (Binder, Val)
@@ -67,13 +66,18 @@ lift ps v i t =
    (VCApp _ _) -> suspended
    (VPath t' _) -> lft v t'
    (VLift _ _ _ _) -> suspended
-   VSim ts -> vsim' (filter isntSimplex $ map (lift ps v i) ts)
-   -- HACK: removing the simplices here. Simplices occur becaue we can have:
+   VSim ts -> vsim' (map (lift ps v i) ts)
+   -- What if we get a VSimplex here?
+   -- Normally this should not happen: there is no VSimplex of type U.
+   -- HOWEVER, we can remember the borders of a value of a U type in the
+   -- form of a VSimplex.
+   -- For example, we can have:
    -- Z : U <i/X> <j/Y>
    -- and so eval Z = <X,Y>
    -- We do this evaluation because we want Z@i@0 = X
-   -- However this value isn't usable to do a lift.
-   -- But on the other hand we can simply block and wait for the variable Z  to be substituted for a proper path between X and Y.
+   -- However such borders are not usable to do a lift. That is fine
+   -- though: we can simply block and wait for the variable Z to be
+   -- substituted for a proper path between X and Y.
    _ -> suspended
 
 isntSimplex :: Val -> Bool
@@ -199,8 +203,13 @@ cceval :: Color -> CVal -> CVal -> CVal
 cceval i p (CVar k) | k == i = p
 cceval _ _ a = a
 
+simplex :: [(Color, Val)] -> Val
 simplex [(_,v)] = v
 simplex x = VSimplex x
+
+vSimplexT :: [Color] -> [Val] -> [(Color, Val, Color)] -> Val
+vSimplexT _ [t] _ = t
+vSimplexT is ts edges = VSimplexT is ts edges
 
 ceval :: Color -> CVal -> Val -> Val
 ceval i p v0 =
@@ -208,7 +217,9 @@ ceval i p v0 =
   in case v0 of
     COLOR -> COLOR
     (VPath a borders) -> VPath (ev a) (ev borders)
-    -- (VSimplexT _ _ _) -> _
+    (VSimplexT is tys edges) -> vSimplexT is' tys' edges'
+     where (is',tys') = unzip [(i',ev ty) | (cceval i p . CVar -> (CVar i'),ty) <- zip is tys]
+           edges' = [(i',ev f,j') | (cceval i p . CVar -> (CVar i'),f,cceval i p . CVar -> (CVar j')) <- edges]
     (VSimplex borders) -> simplex [(j,ev b) | (cceval i p . CVar -> (CVar j),b) <- borders]
     (VLift projections x j _t) | i == j, p == Zero -> cevals projections x
     (VLift projections x j t) -> VLift ((i,p):projections) x j t
