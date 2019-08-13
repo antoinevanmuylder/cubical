@@ -97,7 +97,7 @@ mkWheres (d:ds) e = Where (mkWheres ds e) d
 
 type TColor = String
 newtype Color = Color String
-  deriving Eq
+  deriving (Eq,Ord)
 instance Show Color where
      show (Color x) = x
 
@@ -130,9 +130,10 @@ data Val = VU
          -- | Similar to a singleton type, but with borders
          | VPath Val -- ^ the type    -- really a singleton type
                  Val -- ^ the border
-         | VLift [(Color,CVal)] Val Color Val
+         | VLift  Val Color Val
          | COLOR -- fake type for colors
          | VSim [Val] -- simultaneously several things
+         | VProj Color Val
 
   -- deriving Eq
 
@@ -303,7 +304,7 @@ showVal su@(s:ss) t0 = case t0 of
   COLOR -> "COLOR"
   VU           -> "U"
   (VPath a xs) -> ("ID("<> showVal su a <> ")") <+> showVal su xs
-  (VLift liftProjs a i t) -> showVal su a <+> ("↑" <> show i) <+> showVal su t <+> show liftProjs
+  (VLift a i t) -> showVal su a <+> ("↑" <> show i) <+> showVal su t
   (Ter t env)  -> show t <+> show env
   (VCon c us)  -> c <+> showVals su us
   (VCLam t)  -> "<" ++ s ++ ">" <+> showVal ss (t $ CVar $ Color s)

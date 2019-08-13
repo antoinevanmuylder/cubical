@@ -3,7 +3,6 @@ module TypeChecker where
 
 import Data.Function
 import Data.List
-import Data.Monoid hiding (Sum)
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Except
@@ -24,25 +23,6 @@ data TEnv = TEnv { index   :: Int   -- for de Bruijn levels
                                     -- what it typechecks?
                  }
   deriving (Show)
-
-reAbsCtxtOnCol :: TColor -> Color -> Ctxt -> Ctxt
-reAbsCtxtOnCol _ _ [] = []
-reAbsCtxtOnCol x i (((x',x'loc),COLOR):ctx)
-  | x == x' = ctx
-  | otherwise = ((x',x'loc),COLOR):reAbsCtxtOnCol x i ctx
-reAbsCtxtOnCol x i ((b,v):ctx) = (b, VCPi $ cabs v):reAbsCtxtOnCol x i ctx
-  where cabs body = clam i body
-
-reAbsCtxt :: TColor -> Color -> Ctxt -> Ctxt
-reAbsCtxt i j = reAbsCtxtOnCol i j
-
-possiblyReAbsAll :: CTer -> CVal -> TEnv -> TEnv
-possiblyReAbsAll (CVar x) (CVar i) e = reAbsAll x i e
-possiblyReAbsAll _ _ e = e
-
-reAbsAll :: TColor -> Color -> TEnv -> TEnv
-reAbsAll x i e = e {env = reAbsWholeEnvOnCol x i (env e),
-                    ctxt = reAbsCtxt x i (ctxt e)}
 
 showCtxt :: Show a => [(([Char], t), a)] -> [Char]
 showCtxt ctx = intercalate ", \n" $ reverse $ [i ++ " : " ++ show v | ((i,_),v) <- ctx]
@@ -162,21 +142,21 @@ check a t = logg ("Extra Checking that " ++ show t ++ " has type " ++ show a) $
     (bs,nu) <- getLblType c a
     checks (bs,nu) es
     dflt
-  (_,CApp u@(CLam _ _) c) -> do
-    -- we prefer to infer type for CApp, because then we also get a
-    -- (possibly precise) value.  however, if we have a lambda inside
-    -- then we wont be able to infer. But, we're still able to check
-    -- and so we proceed here
-    c' <- colorEval c
-    case (c,c') of
-      (CVar i,CVar i') -> local (reAbsAll i i') $ do
-        -- ctx <- asks ctxt
-        -- trace ("after reabs " <> show (i,i') <> "\n, context became \n" <> showCtxt ctx)
-        checkLogg (cpi $ \j -> ceval i' j a) u
-      _ -> logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
-          (t',v) <- checkInfer t
-          checkSub "inferred type" [t'] v a -- if not a variable, fall back to plain inference
-          return t'
+  -- (_,CApp u@(CLam _ _) c) -> do
+  --   -- we prefer to infer type for CApp, because then we also get a
+  --   -- (possibly precise) value.  however, if we have a lambda inside
+  --   -- then we wont be able to infer. But, we're still able to check
+  --   -- and so we proceed here
+  --   c' <- colorEval c
+  --   case (c') of
+  --     (CVar i') -> do
+  --       -- ctx <- asks ctxt
+  --       -- trace ("after reabs " <> show (i,i') <> "\n, context became \n" <> showCtxt ctx)
+  --       checkLogg (cpi $ \j -> ceval i' j a) u
+  --     _ -> logg ("in capp, checking that term " ++ show t ++ " has type " ++ show a) $ do
+  --         (t',v) <- checkInfer t
+  --         checkSub "inferred type" [t'] v a -- if not a variable, fall back to plain inference
+  --         return t'
   (VU,Sum _ bs) -> do
     sequence_ [checkTele as | (_,as) <- bs]
     dflt
@@ -309,7 +289,7 @@ checkInfer' e =
     (a',_) <- inferTypeEval a
     i' <- colVarEval i
     t' <- check (proj i' a') t
-    return (Eval.lift [] t' i' a', a')
+    return (Eval.lift t' i' a', a')
   Path a ixs -> do
     a' <- check VU a
     ixs' <- forM ixs $ \(i,x) -> do
@@ -321,10 +301,10 @@ checkInfer' e =
     var <- getFreshCol
     _ <- local (addCol x var) $ inferType t
     typ
-  CLam i t -> do -- additional rule to infer CLam
-    var@(CVar v) <- getFreshCol
-    (t',a) <- local (addCol i var) $ checkInfer t
-    return (clam' $ \i' -> ceval v i' t', cpi $ \i' -> ceval v i' a)
+  -- CLam i t -> do -- additional rule to infer CLam
+  --   var@(CVar v) <- getFreshCol
+  --   (t',a) <- local (addCol i var) $ checkInfer t
+  --   return (clam' $ \i' -> ceval v i' t', cpi $ \i' -> ceval v i' a)
   Pi a (Lam x b) -> do
     _ <- inferType a
     _ <- localM (addType (x,a)) $ inferType b
@@ -361,7 +341,7 @@ checkInfer' e =
       _          -> oops $ show c ++ " is not a sigma-type"
   CApp t u -> do
     u' <- colorEval u
-    (t',c) <- local (possiblyReAbsAll u u') $ do
+    (t',c) <- do
       -- ctx <- asks ctxt
       -- trace ("after reabs " <> show (u,u') <> "\n, context became \n" <> showCtxt ctx)
       (checkInfer t)

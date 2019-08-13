@@ -6,7 +6,8 @@
 module Eval where
 
 import CTT
-import Data.List 
+import Data.List
+import Data.Function (on)
 
 look :: Ident -> Env -> (Binder, Val)
 look _ Empty = error "look: not found!"
@@ -26,29 +27,18 @@ lkCol i (PCol e (n@(j,_),v)) | i == j = (n,v)
 lkCol i Empty = error $ "Color " ++ show i ++ " not found"
 
 
-reAbsEnvOnCol :: TColor -> Color -> Env -> Env
-reAbsEnvOnCol _x _ Empty = Empty
-reAbsEnvOnCol x i (Pair e (b,v)) = Pair (reAbsEnvOnCol x i e) (b, reabs)
-  where reabs = clam i v
-reAbsEnvOnCol x _i (PCol e ((x',_), _c)) | x == x' = e
-reAbsEnvOnCol x i (PCol e c) = PCol (reAbsEnvOnCol x i e) c
-reAbsEnvOnCol x i (PDef xas e) = PDef xas (reAbsEnvOnCol x i e) -- ???
-
-reAbsWholeEnvOnCol :: TColor -> Color -> Env -> Env
-reAbsWholeEnvOnCol x i e = reAbsEnvOnCol x i e
-
 reconstruct :: Val -> Color -> [(Color,Val,Color)] -> Val
 reconstruct v i edges = VSimplex ((i,v):[(j,f `app` v) | (i',f,j) <- edges, i'==i])
 
-lift :: [(Color,CVal)] -> Val -> Color -> Val -> Val
-lift ps v i t =
-  let suspended = VLift ps v i t
-      lft v' t' = lift ps v' i t'
+lift :: Val -> Color -> Val -> Val
+lift v i t =
+  let suspended = VLift v i t
+      lft v' t' = lift v' i t'
   in case t of
    -- v : t[0/i]
    VPi _a f -> VLam $ \x -> lft (v `app` proj i x) (f `app` x)
    VU -> v
-   VSimplexT is _tys edges -> cevals ps $ reconstruct w i edges
+   VSimplexT is _tys edges -> reconstruct w i edges
      where w = (projs (is \\ [i]) v)
    (Ter _ _) -> suspended
    (VSigma a f) -> VSPair l (lft (sndSVal v) (f `app` l))
@@ -65,8 +55,8 @@ lift ps v i t =
    (VCLam _) -> error "lift: not a type (VCLam)"
    (VCApp _ _) -> suspended
    (VPath t' _) -> lft v t'
-   (VLift _ _ _ _) -> suspended
-   VSim ts -> vsim' (map (lift ps v i) ts)
+   (VLift _ _ _) -> suspended
+   VSim ts -> vsim' (map (lift v i) ts)
    -- What if we get a VSimplex here?
    -- Normally this should not happen: there is no VSimplex of type U.
    -- HOWEVER, we can remember the borders of a value of a U type in the
@@ -88,20 +78,7 @@ eval :: Env -> Ter -> Val
 eval _e U              = VU
 eval e (Lift s i t) = case colEval e (CVar i) of
   Zero -> eval e s
-  CVar i' -> lift [(j,colEval e (CVar j0)) | (j0,j) <- renaming]
-                  (eval e' s) i' (eval e' t)
-  where e' = mapEnv e
-        mapEnv :: Env -> Env
-        mapEnv = \case
-          Empty -> Empty
-          (Pair rho d) -> Pair (mapEnv rho) d
-          (PDef d rho) -> PDef d (mapEnv rho)
-          (PCol rho (b@(x,_),v)) -> PCol (mapEnv rho) $ (b,) $ case lookup x renaming of
-            Nothing -> v
-            Just j -> CVar j
-        projectedColors :: [Ident]
-        projectedColors = [x | ((x,_loc),Zero) <- envColors e]
-        renaming = zip projectedColors (freshColors e)
+  CVar i' -> lift (eval e s) i' (eval e t)
 eval e (App r s)       = app (eval e r) (eval e s)
 eval e (Var i)         = snd (look i e)
 eval e (Pi a b)        = VPi (eval e a) (eval e b)
@@ -139,9 +116,9 @@ colEval _ Zero = Zero
 evals :: Env -> [(Binder,Ter)] -> [(Binder,Val)]
 evals env bts = [(b,eval env t) | (b,t) <- bts]
 
-cevals :: [(Color,CVal)] -> Val -> Val
-cevals [] = id
-cevals ((i,j):xs) = ceval i j . cevals xs
+-- cevals :: [(Color,CVal)] -> Val -> Val
+-- cevals [] = id
+-- cevals ((i,j):xs) = ceval i j . cevals xs
 
 vsim' :: [Val] -> Val
 vsim' [x] = x
@@ -193,15 +170,15 @@ vsim x y = vsim' [x,y]
 --     Psi a -> Psi (su a)
 --     Ni a b -> Ni (su a) (su b)
 
-cevalEnv :: Color -> CVal -> Env -> Env
-cevalEnv i p (Pair e (b,v)) = cevalEnv i p e `Pair` (b, ceval i p v)
-cevalEnv i p (PDef d e) = PDef d $ cevalEnv i p e
-cevalEnv i p (PCol e (b,p')) = PCol (cevalEnv i p e) (b, cceval i p p')
-cevalEnv _i _p Empty = Empty
+-- cevalEnv :: Color -> CVal -> Env -> Env
+-- cevalEnv i p (Pair e (b,v)) = cevalEnv i p e `Pair` (b, ceval i p v)
+-- cevalEnv i p (PDef d e) = PDef d $ cevalEnv i p e
+-- cevalEnv i p (PCol e (b,p')) = PCol (cevalEnv i p e) (b, cceval i p p')
+-- cevalEnv _i _p Empty = Empty
 
-cceval :: Color -> CVal -> CVal -> CVal
-cceval i p (CVar k) | k == i = p
-cceval _ _ a = a
+ccproj :: Color -> CVal -> CVal
+ccproj i (CVar k) | k == i = Zero
+ccproj _ Zero = Zero
 
 simplex :: [(Color, Val)] -> Val
 simplex [(_,v)] = v
@@ -211,20 +188,20 @@ vSimplexT :: [Color] -> [Val] -> [(Color, Val, Color)] -> Val
 vSimplexT _ [t] _ = t
 vSimplexT is ts edges = VSimplexT is ts edges
 
-ceval :: Color -> CVal -> Val -> Val
-ceval i p v0 =
-  let ev = ceval i p
+proj :: Color -> Val -> Val
+proj i v0 =
+  let ev = proj i
   in case v0 of
     COLOR -> COLOR
     (VPath a borders) -> VPath (ev a) (ev borders)
     (VSimplexT is tys edges) -> vSimplexT is' tys' edges'
-     where (is',tys') = unzip [(i',ev ty) | (cceval i p . CVar -> (CVar i'),ty) <- zip is tys]
-           edges' = [(i',ev f,j') | (cceval i p . CVar -> (CVar i'),f,cceval i p . CVar -> (CVar j')) <- edges]
-    (VSimplex borders) -> simplex [(j,ev b) | (cceval i p . CVar -> (CVar j),b) <- borders]
-    (VLift projections x j _t) | i == j, p == Zero -> cevals projections x
-    (VLift projections x j t) -> VLift ((i,p):projections) x j t
+     where (is',tys') = unzip [(i',ev ty) | (i',ty) <- zip is tys, i' /= i]
+           edges' = [(i',ev f,j') | (i',f,j') <- edges, i' /= i, j' /= i]
+    (VSimplex borders) -> simplex [(j,ev b) | (j,b) <- borders, j /= i]
+    (VLift x j _t) | i == j -> x
+    (VLift _ _ _) -> VProj i v0
     VU  -> VU
-    Ter t env -> Ter t (cevalEnv i p env) -- add color projections!
+    -- Ter t env -> Ter t (cevalEnv i p env) -- add color projections!
     VPi a b -> VPi (ev a) (ev b)
     VSigma a b -> VSigma (ev a) (ev b)
     VSPair a b -> VSPair (ev a) (ev b)
@@ -234,14 +211,43 @@ ceval i p v0 =
     VVar x -> VVar x
     VFst a -> VFst (ev a)
     VSnd a -> VSnd (ev a)
-    VCApp a k -> capp (ev a) (cceval i p k)
+    VCApp a k -> capp (ev a) (ccproj i k)
     VCPi x -> VCPi (ev x)
     VCLam a -> VCLam (\k -> ev $ a k)
     VLam f -> VLam (ev . f)
     VSim xs -> VSim (fmap ev xs)
 
-proj :: Color -> Val -> Val
-proj i v = clam' (\j -> ceval i j v)  `capp` Zero
+-- ceval :: Color -> CVal -> Val -> Val
+-- ceval i p v0 =
+--   let ev = ceval i p
+--   in case v0 of
+--     COLOR -> COLOR
+--     (VPath a borders) -> VPath (ev a) (ev borders)
+--     (VSimplexT is tys edges) -> vSimplexT is' tys' edges'
+--      where (is',tys') = unzip [(i',ev ty) | (cceval i p . CVar -> (CVar i'),ty) <- zip is tys]
+--            edges' = [(i',ev f,j') | (cceval i p . CVar -> (CVar i'),f,cceval i p . CVar -> (CVar j')) <- edges]
+--     (VSimplex borders) -> simplex [(j,ev b) | (cceval i p . CVar -> (CVar j),b) <- borders]
+--     (VLift projections x j _t) | i == j, p == Zero -> cevals projections x
+--     (VLift projections x j t) -> VLift ((i,p):projections) x j t
+--     VU  -> VU
+--     -- Ter t env -> Ter t (cevalEnv i p env) -- add color projections!
+--     VPi a b -> VPi (ev a) (ev b)
+--     VSigma a b -> VSigma (ev a) (ev b)
+--     VSPair a b -> VSPair (ev a) (ev b)
+--     VCon x as -> VCon x (map ev as)
+--     VApp a b -> app (ev a) (ev b)
+--     VSplit a b -> VSplit (ev a) (ev b)
+--     VVar x -> VVar x
+--     VFst a -> VFst (ev a)
+--     VSnd a -> VSnd (ev a)
+--     VCApp a k -> capp (ev a) (cceval i p k)
+--     VCPi x -> VCPi (ev x)
+--     VCLam a -> VCLam (\k -> ev $ a k)
+--     VLam f -> VLam (ev . f)
+--     VSim xs -> VSim (fmap ev xs)
+
+-- proj :: Color -> Val -> Val
+-- proj i v = clam' (\j -> ceval i j v)  `capp` Zero
 
 projs :: [Color] -> Val -> Val
 projs [] = id
@@ -253,9 +259,9 @@ clam' f = VCLam f -- clam k (f $ CVar k)
             -- FIXME: this is not good, because the fresh variable may
             -- capture some variables present in types.
 
-clam :: Color -> Val -> Val
-clam i (VCApp a (CVar i')) | i == i' = a   -- eta contraction (no need for occurs check!)
-clam i a = VCLam $ \j -> ceval i j a
+-- clam :: Color -> Val -> Val
+-- clam i (VCApp a (CVar i')) | i == i' = a   -- eta contraction (no need for occurs check!)
+-- clam i a = VCLam $ \j -> ceval i j a
 
 -- clams :: [Color] -> Val -> Val
 -- clams [] t = t
@@ -288,7 +294,7 @@ simplexZip f s t = [(i,f si (projs (cols \\ [i]) t)) | (i,si) <- s]
   where cols = map fst s
 
 app :: Val -> Val -> Val
-app (VSimplex f) u = VSimplex (simplexZip app f u)
+-- app (VSimplex f) u = VSimplex (simplexZip app f u)
 -- app u (VSimplex t) = VSimplex (simplexZip (flip app) t u)
 app (VLam f) u = f u
 -- app (Ter (Lam cs x t) e) u = eval (Pair e (x,clams cs u)) t
@@ -329,6 +335,9 @@ instance Semigroup Err where
 instance Monoid Err where
   mempty = NoErr
 
+stp :: [(Color,a)] -> ([Color],[a])
+stp = unzip . sortBy (compare `on` fst)
+
 conv :: Int -> Val -> Val -> Err
 conv k (VSim xs) y = anyOf [conv k x y | x <- xs]
 conv k y (VSim xs) = anyOf [conv k y x | x <- xs]
@@ -342,8 +351,7 @@ conv k (VCLam f) t = conv (k+1) (f c) (capp t c)
   where c = mkCol k
 conv k t (VCLam f) = conv k (VCLam f) t
 conv k (VCApp a b) (VCApp a' b') = conv k a a' <> equal b b'
-conv k (VSimplex x) y = mconcat $ map snd $ simplexZip (conv k) x y
-conv k y (VSimplex x) = mconcat $ map snd $ simplexZip (flip (conv k)) x y
+conv k (VSimplex (stp -> (is,xs))) (VSimplex (stp -> (js,ys))) = equal is js <> convs k xs ys where
 -- conv k (Ter (Lam cs x u) e) (Ter (Lam cs' x' u') e') = do
 --   let v = mkVar k
 --   cs `equal` cs' <> conv (k+1) (eval (Pair e (x,v)) u) (eval (Pair e' (x',v)) u')
