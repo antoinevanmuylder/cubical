@@ -1,7 +1,12 @@
 *~
+*\#
 *.hi
 *.ho
 *.o
 dist/
 Exp/
 /cubical
+
+.stack-work/*
+stack.yaml
+stack.yaml.lock

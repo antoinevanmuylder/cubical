@@ -1,3 +1,20 @@
+NOTE
+======
+
+This is a fork of a repo containing an implementation of the BCM type system.
+Here is how to build the project (branch proj-no-proj !)
+
+```bash
+git clean -fx
+stack init #choosing a snapshot with the correct dependencies
+stack setup #download sandboxed ghc
+stack build #building dependencies and executables
+```
+
+The rest of this README is old.
+
+
+
 CUBICAL
 =======
 
