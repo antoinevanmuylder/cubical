@@ -143,7 +143,7 @@ imports v st@(notok,loaded,mods) f
       then putStrLn (f ++ " does not exist") >> return ([],[],[])
       else do
         s <- readFile f
-        let ts = lexer s
+        let ts = lexer s -- lexer = tokens (cf Lex.x)
         case pModule ts of
           Bad s  -> do
             putStrLn $ "Parse failed in " ++ show f ++ "\n" ++ show s
