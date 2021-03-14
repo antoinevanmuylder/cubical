@@ -14,3 +14,5 @@ clean:
 
 tests:
 	runghc Tests.hs
+texdoc:
+	cd Exp && bnfc --latex ../Exp.cf
