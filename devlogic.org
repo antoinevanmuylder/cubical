@@ -1,75 +1,101 @@
 In this file we describe the logic underlying this development.
 * build
 This stack project is based on a cabal file with a custom build type (because some bnfc preprocessing must happen). The pre build is described in Setup.hs. It basically executes ~bnfc --haskell -d Exp.cf~ when relevant.
-This generates Lex.x, Par.y files which are automatically analysed by cabal when ~stack build~ occurs. see cabal documentation here?
-* bnfc
-~bnfc --haskell -d Exp.cf~ generates a bunch of files in ~Exp/~. 
-~Exp.cf~ is a labelled BNF (LBNF) grammar describing the language of our toy proof assistant (bcm-bch). The bnf converter bnfc basically generates a lexer (.x), parser (.y) and a abstract syntax representation in Haskell (Abs.hs)
+This generates Lex.x, Par.y files which are automatically analysed by cabal when ~stack build~ occurs. see cabal documentation to understand how .x and .y are automatically processed?
+* from source to target
+SOURCE = the lbnf described in Exp.cf. = /surface syntax/
+TARGET = Exp from CTT.hs = /backend syntax/ (ctt stands for cubical type theory).
+** *LANG* particular LBNF (Exp.cf)
+to get a lexer, parser, and haskell abstract syntax for this LBNF we use bnfc
+** *PASS* bnfc lexer & parser :: LBNF (Exp.cf) --> HSKL abs syntax (Exp/Abs.hs)
+ ~bnfc --haskell -d Exp.cf~ generates a bunch of files in ~Exp/~. 
+ ~Exp.cf~ is a labelled BNF (LBNF) grammar describing the language of our toy proof assistant (bcm-bch). The bnf converter bnfc basically generates a lexer (.x), parser (.y) and a abstract syntax representation in Haskell (Abs.hs)
 
-CUSTOM LBNF (_.cf) ----lexer,parser----> LG IMPLEMENTED IN Abs.hs
-raw sentence      |----lexer,parser----> abstract syntax tree in Haskell
+ CUSTOM LBNF (_.cf) ----lexer,parser----> LG IMPLEMENTED IN Abs.hs
+ raw sentence      |----lexer,parser----> abstract syntax tree in Haskell
 
-BNFC also generates the following files
-- pretty-printer
-- some documentation related files (latex,txt,...)
-- *more importantly* it generates a file ~Skel.hs~ which basically contain an induction principle for our custom language. Using this principle it is possible, for instance, to define an interpreter or a compiler for our language.
-* CTT.hs
-what is this file?
+ BNFC also generates the following files
+ - pretty-printer
+ - some documentation related files (latex,txt,...)
+ - *more importantly* it generates a file ~Skel.hs~ which basically contain an induction principle for our custom language. Using this principle it is possible, for instance, to define an interpreter or a compiler for our language.
+*** note:
+ It seems that CTT.hs redefines the source. So whats the diff between Abs.hs and CTT.hs??
+** *LANG* Exp/Abs.hs
+** *PASS* Concrete.hs :: Abs.hs --> CTT
+Convert the readable syntax into the unreadable syntax of cubical TT
+I believe Concrete.hs uses the induction principle freely provided by bnfc to define the pass, which is nice
+** *LANG* CTT.hs
+ what is this file? how does it differ from Abs.hs? -> its lower level, compilerwise
+ - I believe he uses locally nameless terms
+ - a type of telescopes, ctxts, declarations
+ #+BEGIN_SRC haskell
+   type Decls  = [(Binder,Ter,Ter)]
+ #+END_SRC
+ a list of declarations like this ~xi : Ai := ei~
+ So, *conceptually* this really is the definition of an independent toy proof assistant.
+ In fact one can write ~cubical~ code and there is an interaction loop available to help typechecking succeed.
+ - Here is the type of *terms*:
+ #+BEGIN_SRC haskell
+ data Ter = App Ter Ter  
+          | Pi Ter Ter
+          | Lam Binder Ter
+          | Sigma Ter Ter
+          | SPair Ter Ter --AVM: just a product?
+          | Fst Ter
+          | Snd Ter
+          | Where Ter Decls --AVM: specify some Decls out of Ter, but this remains a Ter.
+          | Var Ident
+          | U  --AVM: a universe type.
+          | Con Label [Ter]  -- constructor c Ms
+          | Split Loc [Brc]  -- branches c1 xs1  -> M1,..., cn xsn -> Mn 
+	  --AVM: the above is used for pattern matching I believe
+          | Sum Binder LblSum  -- labelled sum c1 A1s,..., cn Ans (assumes terms are constructors)
+          | Undef Loc
 
-- I believe he uses locally nameless terms
-- a type of telescopes, ctxts, declarations
-#+BEGIN_SRC haskell
-  type Decls  = [(Binder,Ter,Ter)]
-#+END_SRC
-a list of declarations like this ~xi : Ai := ei~
-So, *conceptually* this really is the definition of an independent toy proof assistant.
-In fact one can write ~cubical~ code and there is an interaction loop available to help typechecking succeed.
-- Here is the type of *terms*:
-#+BEGIN_SRC haskell
-data Ter = App Ter Ter  
-         | Pi Ter Ter
-         | Lam Binder Ter
-         | Sigma Ter Ter
-         | SPair Ter Ter --AVM: just a product?
-         | Fst Ter
-         | Snd Ter
-         | Where Ter Decls --AVM: specify some Decls out of Ter, but this remains a Ter.
-         | Var Ident
-         | U  --AVM: a universe type.
-         | Con Label [Ter]  -- constructor c Ms
-         | Split Loc [Brc]  -- branches c1 xs1  -> M1,..., cn xsn -> Mn 
-	 --AVM: the above is used for pattern matching I believe
-         | Sum Binder LblSum  -- labelled sum c1 A1s,..., cn Ans (assumes terms are constructors)
-         | Undef Loc
+	  --AVM: below appear colored terms
+	  --I need to figure out which is which
+          | CLam Binder Ter -- forall i , A ? 
+          | CApp Ter CTer  --t@i for some color i?
+          | CProj Ter Int TColor
+            --    Γ, ∀i.Δ ⊢ t : ∀i.A
+            -- --------------------------
+            --    Γ,i, Δ ⊢ t@(0/i) : A@0
+          | CPi Ter
+          | Rename CTer Ter
 
-	 --AVM: below appear colored terms
-	 --I need to figure out which is which
-         | CLam Binder Ter -- forall i , A ? 
-         | CApp Ter CTer  --t@i for some color i?
-         | CProj Ter Int TColor
-           --    Γ, ∀i.Δ ⊢ t : ∀i.A
-           -- --------------------------
-           --    Γ,i, Δ ⊢ t@(0/i) : A@0
-         | CPi Ter
-         | Rename CTer Ter
-
-         | Path Ter [(TColor,Ter)]
-         | Lift Ter TColor Ter
-#+END_SRC
-colored terms can be handled using rules that
-quantify whole contexts apparently
-- Beyond raw terms they have a type of values, but what are values?
-- the implementation is based on an implementation of BCH which also has affine dimension variables. The file adds capability to deal with affineness I believe.
-* Eval.hs
-I think that this file defines a reduction relation on closed BCM terms
-* TypeChecker.hs
-This file basically define an interactive BCM type checker
-#+BEGIN_SRC haskell
--- Type checking monad
-type Typing a = ReaderT TEnv (ExceptT String IO) a
-#+END_SRC
-in other words Typing a = TEnv -> IO(String + a)
-what does a stand for? a typical use involves a=TEnv I think
-* examples/stt.cub
+          | Path Ter [(TColor,Ter)]
+          | Lift Ter TColor Ter
+ #+END_SRC
+ colored terms can be handled using rules that
+ quantify whole contexts apparently
+ - Beyond raw terms they have a type of values, but what are values?
+ - the implementation is based on an implementation of BCH which also has affine dimension variables. The file adds capability to deal with affineness I believe.
+* evaluate and typecheck backend syntax
+** CTT.hs
+** Eval.hs
+ I think that this file defines a reduction relation on closed BCM terms
+ it only imports CTT.hs
+** TypeChecker.hs
+ This file basically define an interactive BCM type checker
+ it imports Eval.hs and CTT.hs
+ #+BEGIN_SRC haskell
+ -- Type checking monad
+ type Typing a = ReaderT TEnv (ExceptT String IO) a
+ #+END_SRC
+ in other words Typing a = TEnv -> IO(String + a)
+ what does a stand for? a typical use involves a=TEnv I think
 * Main.hs
-* Concrete.hs
+lets try to understand main
+#+BEGIN_SRC haskell
+-- Initialize the main loop
+initLoop :: [Flag] -> FilePath -> IO ()
+initLoop flags f = do
+  -- Parse and type-check files
+  (_,_,mods) <- imports True ([],[],[]) f
+  -- Translate to CTT
+  let res = runResolver $ resolveModules mods
+  case res of
+#+END_SRC
+Apparently LBNF is translated internally into CTT?
+* examples/stt.cub
+an old example?
