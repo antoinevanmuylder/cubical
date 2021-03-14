@@ -1,11 +1,14 @@
 entrypoints Module, Exp ;
+-- we are only interested in parsers for Module and Exp (not other labels)
 
 comment "--" ;
 comment "{-" "-}" ;
+-- comments of our source language
 
 layout "where", "let", "split", "mutual" ;
 layout stop "in" ;
 -- Do not use layout toplevel as it makes pExp fail!
+-- Layout syntax is a means of using indentation to group program elements
 
 Module.   Module ::= "module" AIdent "where" "{" [Imp] [Decl] "}" ;
 
@@ -26,6 +29,7 @@ Infty.    CExp ::= "+" ;
 CVar.     CExp ::= AIdent ;
 
 coercions CExp 2 ;
+-- this has to do with precedence levels
 
 Cols.     MCols ::= "<" [AIdent] ">";
 NoCols.   MCols ::= ;
