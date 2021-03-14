@@ -1,0 +1,16 @@
+In this file we describe the logic underlying this development.
+* build
+This stack project is based on a cabal file with a custom build type (because some bnfc preprocessing must happen). The pre build is described in Setup.hs. It basically executes ~bnfc --haskell -d Exp.cf~ when relevant.
+This generates Lex.x, Par.y files which are automatically analysed by cabal when ~stack build~ occurs. see cabal documentation here?
+* bnfc
+~bnfc --haskell -d Exp.cf~ generates a bunch of files in ~Exp/~. 
+~Exp.cf~ is a labelled BNF (LBNF) grammar describing the language of our toy proof assistant (bcm-bch). The bnf converter bnfc basically generates a lexer (.x), parser (.y) and a abstract syntax representation in Haskell (Abs.hs)
+
+CUSTOM LBNF (_.cf) ----lexer,parser----> LG IMPLEMENTED IN Abs.hs
+raw sentence      |----lexer,parser----> abstract syntax tree in Haskell
+
+BNFC also generates the following files
+- pretty-printer
+- some documentation related files (latex,txt,...)
+- *more importantly* it generates a file ~Skel.hs~ which basically contain an induction principle for our custom language. Using this principle it is possible, for instance, to define an interpreter or a compiler for our language.
+
