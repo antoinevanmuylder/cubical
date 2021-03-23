@@ -1,0 +1,4 @@
+module test where
+
+id : (A : U) -> A -> A
+id A a = a

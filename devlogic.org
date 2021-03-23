@@ -1,4 +1,5 @@
 In this file we describe the logic underlying this development.
+The surface syntax is old so there is a possibility that only the backend syntax does what we want
 * build
 This stack project is based on a cabal file with a custom build type (because some bnfc preprocessing must happen). The pre build is described in Setup.hs. It basically executes ~bnfc --haskell -d Exp.cf~ when relevant.
 This generates Lex.x, Par.y files which are automatically analysed by cabal when ~stack build~ occurs. see cabal documentation to understand how .x and .y are automatically processed?
@@ -98,4 +99,4 @@ initLoop flags f = do
 #+END_SRC
 Apparently LBNF is translated internally into CTT?
 * examples/stt.cub
-an old example?
+an old example? (does not parse)
